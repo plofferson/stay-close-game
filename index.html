@@ -11,14 +11,23 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
+  <!-- Start / Splash: hero image + click to open menu -->
+  <div id="start-screen" class="screen start-screen active">
+    <div class="start-hero" aria-hidden="true"></div>
+    <div class="start-content">
+      <h1 class="game-title">Stay Close</h1>
+      <p class="click-to-start">Click to start</p>
+    </div>
+  </div>
+
   <!-- Main Menu -->
-  <div id="main-menu" class="screen active">
+  <div id="main-menu" class="screen">
     <h1 class="game-title">Stay Close</h1>
     <p class="subtitle">Don't wander off... again.</p>
     <p id="selected-player-display" class="selected-player"></p>
     <div class="menu-buttons">
-      <button id="btn-start" class="menu-btn">Start Game</button>
       <button id="btn-choose-player" class="menu-btn">Choose Player</button>
+      <button id="btn-start" class="menu-btn" disabled>Start Game</button>
       <button id="btn-how-to-play" class="menu-btn">How to Play</button>
     </div>
   </div>
@@ -34,7 +43,9 @@
   <div id="game-screen" class="screen">
     <div class="canvas-wrap">
       <canvas id="game-canvas"></canvas>
+      <div id="score-display" class="score-display">0</div>
       <div id="timer-display" class="timer-display">0:00</div>
+      <div id="taunt-message" class="taunt-message hidden">Dichterbij slome duikelaar.</div>
       <!-- Mobile: single Jump button (shown on touch devices) -->
       <div id="touch-controls" class="touch-controls" aria-hidden="true">
         <button type="button" id="btn-jump" class="touch-btn jump-btn" aria-label="Jump">JUMP</button>
@@ -46,20 +57,24 @@
   <!-- Game Over Screen -->
   <div id="gameover-screen" class="screen overlay-screen">
     <h2 class="screen-title">Game Over</h2>
-    <p id="gameover-message" class="message"></p>
+    <p id="gameover-player-name" class="scorecard-player"></p>
+    <p id="gameover-message" class="message scorecard-message">Trainen. Melden.</p>
+    <p id="gameover-score" class="scorecard-score"></p>
     <div class="menu-buttons">
-      <button id="btn-retry" class="menu-btn">Retry</button>
-      <button id="btn-gameover-menu" class="menu-btn">Main Menu</button>
+      <button id="btn-retry" class="menu-btn">Opnieuw beginnen</button>
+      <button id="btn-gameover-menu" class="menu-btn">Terug naar menu</button>
     </div>
   </div>
 
   <!-- Win Screen -->
   <div id="win-screen" class="screen overlay-screen">
-    <h2 class="screen-title">Level Complete!</h2>
-    <p id="win-message" class="message">You actually stayed! Battlefield miracle.</p>
+    <h2 class="screen-title">Missie voltooid</h2>
+    <p id="win-player-name" class="scorecard-player"></p>
+    <p id="win-message" class="message scorecard-message">Das er ginne voor Tempo Team, maar voor 't Dream Team!</p>
+    <p id="win-score" class="scorecard-score"></p>
     <div class="menu-buttons">
-      <button id="btn-next-level" class="menu-btn">Next Level</button>
-      <button id="btn-win-menu" class="menu-btn">Main Menu</button>
+      <button id="btn-win-retry" class="menu-btn">Opnieuw beginnen</button>
+      <button id="btn-win-menu" class="menu-btn">Terug naar menu</button>
     </div>
   </div>
 

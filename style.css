@@ -64,6 +64,51 @@ body {
   z-index: 100;
 }
 
+/* Start screen: hero image background + click anywhere to open menu */
+.start-screen {
+  cursor: pointer;
+  position: relative;
+  background: var(--bg-dark);
+  overflow: hidden;
+}
+.start-screen .start-hero {
+  position: absolute;
+  inset: 0;
+  background: var(--bg-dark) center / cover no-repeat;
+  background-image: url("assets/start-hero.png");
+}
+.start-screen .start-hero::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to bottom, rgba(13,13,18,0.4) 0%, rgba(13,13,18,0.75) 60%, rgba(13,13,18,0.9) 100%);
+}
+.start-screen .start-content {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.5rem;
+}
+.start-screen .game-title {
+  margin-bottom: 0;
+  text-shadow: 0 2px 8px rgba(0,0,0,0.8);
+}
+.start-screen .click-to-start {
+  text-shadow: 0 2px 6px rgba(0,0,0,0.8);
+}
+.click-to-start {
+  font-family: var(--font-pixel);
+  font-size: clamp(0.65rem, 3vw, 0.9rem);
+  color: var(--accent-dim);
+  animation: pulse-start 1.5s ease-in-out infinite;
+}
+@keyframes pulse-start {
+  0%, 100% { opacity: 0.9; }
+  50% { opacity: 0.5; }
+}
+
 /* Main Menu */
 .game-title {
   font-family: var(--font-pixel);
@@ -89,6 +134,23 @@ body {
 
 .selected-player:empty {
   display: none;
+}
+
+.selected-player.empty {
+  color: var(--text-dim);
+  font-style: italic;
+}
+
+.menu-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  border-color: var(--text-dim);
+  color: var(--text-dim);
+}
+.menu-btn:disabled:hover {
+  background: var(--bg-panel);
+  color: var(--text-dim);
+  box-shadow: none;
 }
 
 .menu-buttons {
@@ -253,6 +315,24 @@ body {
   margin-top: 0;
 }
 
+.score-display {
+  position: absolute;
+  top: 22%;
+  left: 50%;
+  transform: translateX(-50%);
+  font-family: var(--font-pixel);
+  font-size: clamp(1.8rem, 10vw, 3.5rem);
+  font-weight: bold;
+  color: var(--accent);
+  text-shadow:
+    0 0 12px rgba(0, 255, 136, 0.8),
+    0 2px 4px rgba(0, 0, 0, 0.9),
+    2px 2px 0 #000,
+    -1px -1px 0 #000;
+  z-index: 10;
+  letter-spacing: 2px;
+}
+
 .timer-display {
   position: absolute;
   top: max(8px, env(safe-area-inset-top));
@@ -261,6 +341,26 @@ body {
   font-size: clamp(0.6rem, 2.5vw, 1rem);
   color: var(--accent);
   z-index: 10;
+}
+
+.taunt-message {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-family: var(--font-pixel);
+  font-size: clamp(0.7rem, 4vw, 1.1rem);
+  font-weight: bold;
+  color: var(--warning);
+  text-shadow: 0 0 10px rgba(255, 170, 0, 0.6), 0 2px 4px rgba(0, 0, 0, 0.9);
+  z-index: 20;
+  pointer-events: none;
+  text-align: center;
+  padding: 0 0.5rem;
+}
+
+.taunt-message.hidden {
+  display: none !important;
 }
 
 .countdown-overlay {
@@ -348,4 +448,25 @@ body {
   color: var(--text);
   margin-bottom: 1.5rem;
   max-width: 400px;
+}
+
+.scorecard-player {
+  font-family: var(--font-pixel);
+  font-size: clamp(0.65rem, 2.5vw, 0.9rem);
+  color: var(--accent);
+  margin-bottom: 0.75rem;
+}
+
+.scorecard-message {
+  font-size: 1.1rem;
+  line-height: 1.5;
+  margin-bottom: 1rem;
+  max-width: 420px;
+}
+
+.scorecard-score {
+  font-family: var(--font-pixel);
+  font-size: clamp(0.8rem, 3vw, 1.2rem);
+  color: var(--accent);
+  margin-bottom: 1.5rem;
 }

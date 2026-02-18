@@ -131,7 +131,7 @@ function setState(newState, screenId) {
 function initMainMenu() {
   document.getElementById('btn-start').addEventListener('click', () => {
     setState(GameState.PLAYING, 'game-screen');
-    startLevel1();
+    requestAnimationFrame(() => startLevel1());
   });
   document.getElementById('btn-choose-player').addEventListener('click', () => {
     setState(GameState.CHOOSE_PLAYER, 'choose-player-screen');
@@ -273,9 +273,22 @@ function getTrenchFloorUnderFriend() {
   return null;
 }
 
+/**
+ * Resize canvas to fill its container (full viewport on mobile); keeps logical size 900x500.
+ */
+function resizeCanvas() {
+  const wrap = canvas.parentElement;
+  if (!wrap) return;
+  const w = wrap.clientWidth || CONFIG.CANVAS_WIDTH;
+  const h = wrap.clientHeight || CONFIG.CANVAS_HEIGHT;
+  if (canvas.width !== w || canvas.height !== h) {
+    canvas.width = w;
+    canvas.height = h;
+  }
+}
+
 function startLevel1() {
-  canvas.width = CONFIG.CANVAS_WIDTH;
-  canvas.height = CONFIG.CANVAS_HEIGHT;
+  resizeCanvas();
   worldScrollX = 0;
   friendWorldX = CONFIG.FRIEND_FIXED_X;
   obstacles = [];
@@ -629,9 +642,15 @@ function drawObstacles() {
 }
 
 /**
- * Draw the game world, obstacles, and characters
+ * Draw the game world, obstacles, and characters.
+ * Game logic uses logical size 900x500; scale to fill canvas (full viewport on mobile).
  */
 function draw() {
+  const scaleX = canvas.width / CONFIG.CANVAS_WIDTH;
+  const scaleY = canvas.height / CONFIG.CANVAS_HEIGHT;
+  ctx.save();
+  ctx.scale(scaleX, scaleY);
+
   drawSky();
   drawDistantSilhouettes();
   drawParallaxBackground();
@@ -644,6 +663,8 @@ function draw() {
   const color = selectedCharacter ? selectedCharacter.color : '#8b7355';
   const label = selectedCharacter ? selectedCharacter.name.charAt(0) : '?';
   drawSoldier(ctx, friendScreenX, friendY, color, label, animTime, false);
+
+  ctx.restore();
 }
 
 /**
@@ -757,6 +778,9 @@ function init() {
   initInput();
   initTouchControls();
   initGameOverAndWin();
+  window.addEventListener('resize', () => {
+    if (state === GameState.PLAYING) resizeCanvas();
+  });
   showScreen('main-menu');
 }
 

@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="mobile-web-app-capable" content="yes">
+  <title>Stay Close</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- Main Menu -->
+  <div id="main-menu" class="screen active">
+    <h1 class="game-title">Stay Close</h1>
+    <p class="subtitle">Don't wander off... again.</p>
+    <p id="selected-player-display" class="selected-player"></p>
+    <div class="menu-buttons">
+      <button id="btn-start" class="menu-btn">Start Game</button>
+      <button id="btn-choose-player" class="menu-btn">Choose Player</button>
+      <button id="btn-how-to-play" class="menu-btn">How to Play</button>
+    </div>
+  </div>
+
+  <!-- Choose Player Screen -->
+  <div id="choose-player-screen" class="screen">
+    <h2 class="screen-title">Choose Your Character</h2>
+    <div id="character-cards" class="character-cards"></div>
+    <button id="btn-confirm-player" class="menu-btn">Confirm</button>
+  </div>
+
+  <!-- Game Canvas Container -->
+  <div id="game-screen" class="screen">
+    <div class="canvas-wrap">
+      <canvas id="game-canvas"></canvas>
+      <div id="timer-display" class="timer-display">0:00</div>
+      <!-- Mobile: single Jump button (shown on touch devices) -->
+      <div id="touch-controls" class="touch-controls" aria-hidden="true">
+        <button type="button" id="btn-jump" class="touch-btn jump-btn" aria-label="Jump">JUMP</button>
+      </div>
+    </div>
+    <div id="game-ui" class="game-ui"></div>
+  </div>
+
+  <!-- Game Over Screen -->
+  <div id="gameover-screen" class="screen overlay-screen">
+    <h2 class="screen-title">Game Over</h2>
+    <p id="gameover-message" class="message"></p>
+    <div class="menu-buttons">
+      <button id="btn-retry" class="menu-btn">Retry</button>
+      <button id="btn-gameover-menu" class="menu-btn">Main Menu</button>
+    </div>
+  </div>
+
+  <!-- Win Screen -->
+  <div id="win-screen" class="screen overlay-screen">
+    <h2 class="screen-title">Level Complete!</h2>
+    <p id="win-message" class="message">You actually stayed! Battlefield miracle.</p>
+    <div class="menu-buttons">
+      <button id="btn-next-level" class="menu-btn">Next Level</button>
+      <button id="btn-win-menu" class="menu-btn">Main Menu</button>
+    </div>
+  </div>
+
+  <!-- How to Play Modal -->
+  <div id="how-to-play-modal" class="modal hidden">
+    <div class="modal-content">
+      <h3>How to Play</h3>
+      <p>You run at the same pace as Plofferson — <strong>tap Jump</strong> to clear obstacles!</p>
+      <ul>
+        <li><strong>Desktop:</strong> Space, Up arrow, or W to jump.</li>
+        <li><strong>Mobile:</strong> Tap the JUMP button.</li>
+        <li>Jump over <strong>cars</strong> and the <strong>house</strong>. Don't fall in the <strong>trench</strong>!</li>
+        <li>Miss a jump and you'll hit an obstacle or fall off the screen — game over.</li>
+        <li><strong>Level 1:</strong> Survive 60 seconds.</li>
+      </ul>
+      <button id="btn-close-modal" class="menu-btn">Got it</button>
+    </div>
+  </div>
+
+  <script src="game.js"></script>
+</body>
+</html>

@@ -1,0 +1,340 @@
+/* Stay Close — Arcade-style UI */
+
+:root {
+  --bg-dark: #0d0d12;
+  --bg-panel: #1a1a24;
+  --accent: #00ff88;
+  --accent-dim: #00aa55;
+  --danger: #ff4444;
+  --warning: #ffaa00;
+  --text: #e8e8e8;
+  --text-dim: #888;
+  --font-pixel: "Press Start 2P", cursive;
+  --font-retro: "VT323", monospace;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  font-family: var(--font-retro);
+  background: var(--bg-dark);
+  color: var(--text);
+  min-height: 100vh;
+  min-height: 100dvh;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* Screens */
+.screen {
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  width: 100%;
+  padding: 2rem;
+  text-align: center;
+}
+
+.screen.active {
+  display: flex;
+}
+
+.overlay-screen {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(13, 13, 18, 0.95);
+  z-index: 100;
+}
+
+/* Main Menu */
+.game-title {
+  font-family: var(--font-pixel);
+  font-size: clamp(1.5rem, 5vw, 2.5rem);
+  color: var(--accent);
+  text-shadow: 0 0 20px rgba(0, 255, 136, 0.4);
+  margin-bottom: 0.5rem;
+  letter-spacing: 2px;
+}
+
+.subtitle {
+  font-size: 1.4rem;
+  color: var(--text-dim);
+  margin-bottom: 1.5rem;
+}
+
+.selected-player {
+  font-size: 1rem;
+  color: var(--accent-dim);
+  margin-bottom: 1rem;
+  min-height: 1.5em;
+}
+
+.selected-player:empty {
+  display: none;
+}
+
+.menu-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  margin-top: 0.5rem;
+}
+
+.menu-btn {
+  font-family: var(--font-pixel);
+  font-size: 0.75rem;
+  padding: 0.9rem 1.8rem;
+  background: var(--bg-panel);
+  color: var(--accent);
+  border: 3px solid var(--accent);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.menu-btn:hover {
+  background: var(--accent);
+  color: var(--bg-dark);
+  box-shadow: 0 0 20px rgba(0, 255, 136, 0.5);
+}
+
+.menu-btn:active {
+  transform: scale(0.98);
+}
+
+/* Choose Player */
+.screen-title {
+  font-family: var(--font-pixel);
+  font-size: clamp(0.9rem, 3vw, 1.2rem);
+  color: var(--accent);
+  margin-bottom: 1.5rem;
+}
+
+.character-cards {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 1rem;
+  margin-bottom: 2rem;
+  max-width: 600px;
+}
+
+.character-card {
+  width: 90px;
+  height: 100px;
+  background: var(--bg-panel);
+  border: 3px solid var(--text-dim);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.character-card:hover {
+  border-color: var(--accent-dim);
+  transform: translateY(-2px);
+}
+
+.character-card.selected {
+  border-color: var(--accent);
+  background: rgba(0, 255, 136, 0.1);
+  box-shadow: 0 0 15px rgba(0, 255, 136, 0.3);
+}
+
+.character-card .char-emoji {
+  font-size: 2.5rem;
+  margin-bottom: 0.3rem;
+}
+
+.character-card .char-name {
+  font-size: 0.85rem;
+  color: var(--text);
+}
+
+/* Game Screen */
+#game-screen {
+  padding: 0;
+  justify-content: flex-start;
+  position: relative;
+  touch-action: none;
+  overflow: hidden;
+}
+
+.canvas-wrap {
+  position: relative;
+  width: 100%;
+  max-width: 900px;
+}
+
+#game-canvas {
+  display: block;
+  background: #1e2a2e;
+  width: 100%;
+  max-width: 900px;
+  height: auto;
+  aspect-ratio: 900 / 500;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+/* Mobile: single Jump button */
+.touch-controls {
+  display: none;
+  position: absolute;
+  bottom: 16px;
+  right: 16px;
+  left: 16px;
+  pointer-events: none;
+  justify-content: center;
+}
+
+.touch-controls.visible {
+  display: flex;
+  pointer-events: auto;
+  touch-action: none;
+}
+
+.touch-btn.jump-btn {
+  width: 100%;
+  max-width: 200px;
+  min-height: 56px;
+  padding: 0 1.5rem;
+  font-family: var(--font-pixel);
+  font-size: 0.9rem;
+  border: 4px solid var(--accent);
+  background: rgba(0, 255, 136, 0.25);
+  color: var(--accent);
+  border-radius: 12px;
+  cursor: pointer;
+  -webkit-user-select: none;
+  user-select: none;
+  touch-action: none;
+}
+
+.touch-btn.jump-btn:active {
+  background: var(--accent);
+  color: var(--bg-dark);
+}
+
+.game-ui {
+  position: relative;
+  width: 100%;
+  max-width: 900px;
+  margin-top: 0;
+}
+
+.timer-display {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  font-family: var(--font-pixel);
+  font-size: 1rem;
+  color: var(--accent);
+  z-index: 10;
+}
+
+.countdown-overlay {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  padding: 1.5rem 2rem;
+  background: rgba(255, 68, 68, 0.9);
+  border: 4px solid #fff;
+  z-index: 50;
+  pointer-events: none;
+}
+
+.countdown-overlay.hidden {
+  display: none !important;
+}
+
+.countdown-text {
+  font-family: var(--font-pixel);
+  font-size: 1.2rem;
+  color: #fff;
+}
+
+/* Modal */
+.modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+  padding: 1rem;
+}
+
+.modal.hidden {
+  display: none !important;
+}
+
+.modal-content {
+  background: var(--bg-panel);
+  border: 4px solid var(--accent);
+  padding: 2rem;
+  max-width: 420px;
+  text-align: left;
+}
+
+.modal-content h3 {
+  font-family: var(--font-pixel);
+  font-size: 0.9rem;
+  color: var(--accent);
+  margin-bottom: 1rem;
+  text-align: center;
+}
+
+.modal-content p,
+.modal-content ul {
+  font-size: 1.2rem;
+  line-height: 1.6;
+  margin-bottom: 0.8rem;
+  color: var(--text);
+}
+
+.modal-content ul {
+  padding-left: 1.5rem;
+  margin-bottom: 1.2rem;
+}
+
+.modal-content li {
+  margin-bottom: 0.4rem;
+}
+
+.modal-content .menu-btn {
+  display: block;
+  margin: 0 auto;
+}
+
+/* Messages */
+.message {
+  font-size: 1.3rem;
+  color: var(--text);
+  margin-bottom: 1.5rem;
+  max-width: 400px;
+}

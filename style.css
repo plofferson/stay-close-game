@@ -110,6 +110,10 @@ body {
 }
 
 /* Main Menu */
+#main-menu {
+  padding-top: 18vh;
+}
+
 .game-title {
   font-family: var(--font-pixel);
   font-size: clamp(1.5rem, 5vw, 2.5rem);
@@ -309,10 +313,33 @@ body {
   color: var(--bg-dark);
 }
 
+/* Level 2: bottom 33% of screen = flap (invisible tap zone) */
+.l2-tap-zone {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 33%;
+  pointer-events: none;
+  touch-action: none;
+}
+
+.l2-tap-zone.visible {
+  pointer-events: auto;
+}
+
+.l2-tap-zone.hidden {
+  display: none !important;
+}
+
 .game-ui {
   position: relative;
   width: 100%;
   margin-top: 0;
+}
+
+.score-display.hidden {
+  display: none !important;
 }
 
 .score-display {

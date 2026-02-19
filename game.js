@@ -34,14 +34,15 @@ const CONFIG = {
   OBSTACLE_SPAWN_MAX: 220,
   /** Obstacle definitions: width (world px), height (px from ground up) */
   OBSTACLES: {
-    car: { width: 55, height: 26 },
-    tank: { width: 72, height: 32 },
+    jeep: { width: 54, height: 28 },
+    tank: { width: 94, height: 40 },
     house1: { width: 58, height: 42 },
     house2: { width: 58, height: 80 },
   },
   /** Small gap between 1-story and 2-story in a house pair */
   HOUSE_PAIR_GAP: 6,
-  /** Intro: plane flies in, then parachute drop to start position */
+  /** Intro: tooltip first, then plane flies in, then parachute drop */
+  L1_INTRO_DURATION: 3,
   PLANE_SPEED: 95,
   PLANE_ENTRY_X_OFFSET: 120,
   PLANE_DROP_X_FRACTION: 0.55,
@@ -54,6 +55,28 @@ const CONFIG = {
   SCORE_POINTS_PER_SECOND: 12,
   /** After landing: first obstacle spawns this far (world px) beyond right edge, so player has room to react */
   LANDING_GRACE_DISTANCE: 220,
+
+  /** Level 2: Chopper — Flappy-style: flap = impulse up, no input = gravity down. Score = seconds survived. */
+  LEVEL2_DURATION: 60,
+  L2_SCROLL_SPEED: 195,
+  L2_INTRO_DURATION: 3,
+  HELI_FIXED_X: 100,
+  HELI_FLAP_VELOCITY: -220,
+  HELI_GRAVITY: 480,
+  HELI_SIZE: 36,
+  L2_GRACE_DISTANCE: 120,
+  L2_SPAWN_MIN: 90,
+  L2_SPAWN_MAX: 200,
+  L2_BUILDING_WIDTH_MIN: 42,
+  L2_BUILDING_WIDTH_MAX: 88,
+  L2_BUILDING_HEIGHT_MIN: 80,
+  L2_BUILDING_HEIGHT_MAX: 420,
+  L2_BUILDING_LOW_THRESHOLD: 180,
+  L2_MINE_RADIUS: 12,
+  /** Mines in upper half of screen only (Y = 0 is top) */
+  L2_MINE_Y_MIN: 70,
+  L2_MINE_Y_MAX: 310,
+  L2_BALLOON_SIZE: 38,
 };
 
 /**
@@ -99,13 +122,13 @@ let friendWorldX = 0;
 let friendY = 0;
 let friendVelY = 0;
 let levelStartTime = 0;
-let keys = { jump: false };
-/** Active obstacles: { type: 'car'|'tank'|'house1'|'house2', worldX: number, width, height } */
+let keys = { jump: false, heliFlap: false };
+/** Active obstacles: { type: 'jeep'|'tank'|'house1'|'house2', worldX: number, width, height } */
 let obstacles = [];
 /** Next obstacle will spawn when world passes this X */
 let nextObstacleAt = 0;
 
-/** Intro phase: 'parachute' = plane + drop, 'running' = normal level */
+/** Intro phase: 'intro_tooltip' = L1 tooltip, 'parachute' = plane + drop, 'running' = normal level */
 let levelPhase = 'running';
 let planeX = 0;
 let planeY = 0;
@@ -118,6 +141,28 @@ let ploffersonTargetX = 0;
 
 /** Current score (earned when close to Plofferson) */
 let score = 0;
+
+/** Which level is playing (1 or 2) */
+let currentLevel = 1;
+
+/** Level 2: helicopter Y, velocity, last control (up/stable/down) */
+let heliY = 0;
+let heliVelY = 0;
+/** Plofferson head image (photo with helmet); drawn when loaded */
+let ploffersonHeadImage = null;
+
+/** Level 2: explosion phase (crash/ground) before game over */
+let l2ExplosionStartTime = 0;
+/** Level 2: seconds survived when defeated (score); set when crash starts */
+let level2ScoreAtDeath = 0;
+const L2_EXPLOSION_DURATION = 0.9;
+
+/** Level 2 obstacles: { type: 'building'|'mine', worldX, width?, height?, y?, radius? } */
+let l2Obstacles = [];
+let nextL2ObstacleAt = 0;
+
+/** Level 1 completed (unlocks Level 2); persisted in localStorage */
+let level1Completed = false;
 
 /** DOM refs */
 const screens = {
@@ -147,13 +192,14 @@ function showScreen(screenId) {
 }
 
 /**
- * Update main menu: Start Game enabled only when a character is chosen
+ * Update main menu: Level 1 enabled when character chosen; Level 2 when L1 completed
  */
 function updateMainMenuState() {
-  const btnStart = document.getElementById('btn-start');
-  if (!btnStart) return;
   const hasCharacter = selectedCharacter !== null;
-  btnStart.disabled = !hasCharacter;
+  const btnL1 = document.getElementById('btn-level1');
+  const btnL2 = document.getElementById('btn-level2');
+  if (btnL1) btnL1.disabled = !hasCharacter;
+  if (btnL2) btnL2.disabled = !hasCharacter || !level1Completed;
   if (selectedPlayerDisplay) {
     selectedPlayerDisplay.textContent = hasCharacter ? `Playing as: ${selectedCharacter.name}` : 'Choose a character to start';
     selectedPlayerDisplay.classList.toggle('empty', !hasCharacter);
@@ -174,10 +220,17 @@ function setState(newState, screenId) {
  * Bind main menu buttons
  */
 function initMainMenu() {
-  document.getElementById('btn-start').addEventListener('click', () => {
+  document.getElementById('btn-level1').addEventListener('click', () => {
     if (!selectedCharacter) return;
+    currentLevel = 1;
     setState(GameState.PLAYING, 'game-screen');
     requestAnimationFrame(() => startLevel1());
+  });
+  document.getElementById('btn-level2').addEventListener('click', () => {
+    if (!selectedCharacter || !level1Completed) return;
+    currentLevel = 2;
+    setState(GameState.PLAYING, 'game-screen');
+    requestAnimationFrame(() => startLevel2());
   });
   document.getElementById('btn-choose-player').addEventListener('click', () => {
     setState(GameState.CHOOSE_PLAYER, 'choose-player-screen');
@@ -237,8 +290,7 @@ function updateChoosePlayerSelection() {
  * Confirm player choice and return to main menu
  */
 function confirmPlayerSelection() {
-  setState(GameState.PLAYING, 'game-screen');
-  requestAnimationFrame(() => startLevel1());
+  setState(GameState.MENU, 'main-menu');
 }
 
 /**
@@ -265,7 +317,7 @@ function getFriendWorldX() {
 }
 
 /**
- * Spawn one obstacle or a house pair (1-story then 2-story). Tanks and cars single; houses always 1 then 2.
+ * Spawn one obstacle or a house pair (1-story then 2-story). Jeeps and tanks single; houses always 1 then 2.
  */
 function spawnObstacle() {
   const roll = Math.random();
@@ -280,7 +332,7 @@ function spawnObstacle() {
     nextObstacleAt += pairWidth + spacing;
     return;
   }
-  const types = ['car', 'tank'];
+  const types = ['jeep', 'tank'];
   const type = types[Math.floor(Math.random() * types.length)];
   const def = CONFIG.OBSTACLES[type];
   obstacles.push({
@@ -332,21 +384,54 @@ function startLevel1() {
   friendVelY = 0;
   levelStartTime = performance.now() / 1000;
   timerDisplay.textContent = '0:00';
+  if (timerDisplay) timerDisplay.classList.remove('hidden');
   lastTime = performance.now();
 
-  levelPhase = 'parachute';
+  levelPhase = 'intro_tooltip';
   planeX = CONFIG.CANVAS_WIDTH + CONFIG.PLANE_ENTRY_X_OFFSET;
   planeY = CONFIG.PLANE_ALTITUDE_Y;
   parachuteDropped = false;
 
   score = 0;
-  if (scoreDisplay) scoreDisplay.textContent = '0';
+  if (scoreDisplay) { scoreDisplay.textContent = '0'; scoreDisplay.classList.remove('hidden'); }
   const tauntEl = document.getElementById('taunt-message');
   if (tauntEl) tauntEl.classList.add('hidden');
 
   if (isTouchDevice()) {
     const tc = document.getElementById('touch-controls');
     if (tc) tc.classList.add('visible');
+    const tapZone = document.getElementById('l2-tap-zone');
+    if (tapZone) tapZone.classList.add('hidden');
+  }
+  requestAnimationFrame(gameLoop);
+}
+
+function startLevel2() {
+  resizeCanvas();
+  currentLevel = 2;
+  worldScrollX = 0;
+  heliY = CONFIG.CANVAS_HEIGHT / 2 - CONFIG.HELI_SIZE / 2;
+  heliVelY = 0;
+  keys.heliFlap = false;
+  l2Obstacles = [];
+  nextL2ObstacleAt = CONFIG.CANVAS_WIDTH + CONFIG.L2_GRACE_DISTANCE;
+  levelStartTime = performance.now() / 1000;
+  l2ExplosionStartTime = 0;
+  level2ScoreAtDeath = 0;
+  timerDisplay.textContent = '0:00';
+  if (timerDisplay) timerDisplay.classList.remove('hidden');
+  lastTime = performance.now();
+  if (scoreDisplay) scoreDisplay.classList.add('hidden');
+  const tauntEl = document.getElementById('taunt-message');
+  if (tauntEl) tauntEl.classList.add('hidden');
+
+  while (nextL2ObstacleAt < CONFIG.CANVAS_WIDTH + 200) spawnL2Obstacle();
+
+  if (isTouchDevice()) {
+    const tc = document.getElementById('touch-controls');
+    if (tc) tc.classList.remove('visible');
+    const tapZone = document.getElementById('l2-tap-zone');
+    if (tapZone) { tapZone.classList.remove('hidden'); tapZone.classList.add('visible'); }
   }
   requestAnimationFrame(gameLoop);
 }
@@ -427,43 +512,55 @@ function isFriendOffLeft() {
 }
 
 /**
- * Game over: show scorecard with player name, "Trainen. Melden.", and score
+ * Game over: show only retry and menu buttons; for L2 show score (seconds survived)
  */
 function triggerGameOver() {
   cancelAnimationFrame(animationId);
   const tc = document.getElementById('touch-controls');
   if (tc) tc.classList.remove('visible');
-  const nameEl = document.getElementById('gameover-player-name');
-  const scoreEl = document.getElementById('gameover-score');
-  if (nameEl) nameEl.textContent = selectedCharacter ? selectedCharacter.name : 'Speler';
-  if (scoreEl) {
-    scoreEl.textContent = '';
-    scoreEl.style.display = 'none';
+  const tapZone = document.getElementById('l2-tap-zone');
+  if (tapZone) tapZone.classList.add('hidden');
+  const l2ScoreEl = document.getElementById('gameover-l2-score');
+  if (l2ScoreEl) {
+    if (currentLevel === 2) {
+      l2ScoreEl.textContent = `Score: ${level2ScoreAtDeath}s`;
+      l2ScoreEl.classList.remove('hidden');
+    } else {
+      l2ScoreEl.classList.add('hidden');
+    }
   }
   setState(GameState.GAMEOVER, 'gameover-screen');
 }
 
 /**
- * Win: show scorecard with player name, dream team quote, and score
+ * Win: show only retry and menu buttons
  */
 function triggerWin() {
   cancelAnimationFrame(animationId);
   const tc = document.getElementById('touch-controls');
   if (tc) tc.classList.remove('visible');
-  const nameEl = document.getElementById('win-player-name');
-  const scoreEl = document.getElementById('win-score');
-  if (nameEl) nameEl.textContent = selectedCharacter ? selectedCharacter.name : 'Speler';
-  if (scoreEl) scoreEl.textContent = `Score: ${Math.floor(score)}`;
+  const tapZone = document.getElementById('l2-tap-zone');
+  if (tapZone) tapZone.classList.add('hidden');
+  if (currentLevel === 1) {
+    level1Completed = true;
+    try { localStorage.setItem('stayClose_level1Completed', '1'); } catch (_) {}
+  }
   setState(GameState.WIN, 'win-screen');
 }
 
 /**
- * Keyboard input: jump only (Space, Up, W)
+ * Keyboard input: Level 1 jump; Level 2 up/stable/down (last key wins)
  */
 function initInput() {
   const jumpCodes = ['Space', 'ArrowUp', 'KeyW'];
+  const flapCodes = ['Space', 'ArrowUp', 'KeyW'];
   document.addEventListener('keydown', (e) => {
-    if (jumpCodes.includes(e.code)) {
+    if (currentLevel === 2) {
+      if (flapCodes.includes(e.code) && !e.repeat) {
+        keys.heliFlap = true;
+        e.preventDefault();
+      }
+    } else if (jumpCodes.includes(e.code)) {
       keys.jump = true;
       e.preventDefault();
     }
@@ -494,6 +591,17 @@ function initTouchControls() {
   jumpBtn.addEventListener('pointerleave', () => setJump(false));
   jumpBtn.addEventListener('pointercancel', () => setJump(false));
   jumpBtn.addEventListener('touchstart', (e) => e.preventDefault(), { passive: false });
+}
+
+/**
+ * Level 2 touch: bottom 33% of screen = flap (one tap = one impulse)
+ */
+function initTouchControlsL2() {
+  const tapZone = document.getElementById('l2-tap-zone');
+  if (!tapZone) return;
+  const flap = () => { keys.heliFlap = true; };
+  tapZone.addEventListener('pointerdown', (e) => { e.preventDefault(); flap(); }, { passive: false });
+  tapZone.addEventListener('touchstart', (e) => { e.preventDefault(); flap(); }, { passive: false });
 }
 
 /**
@@ -557,8 +665,13 @@ function drawParachuteIntro() {
   if (!parachuteDropped) {
     drawPlane(planeX, planeY);
   } else {
-    drawParachuteCanopy(friendParachuteX, friendParachuteY);
-    drawParachuteCanopy(ploffersonParachuteX, ploffersonParachuteY);
+    // #region agent log
+    fetch('http://127.0.0.1:7243/ingest/2a1a30c2-e1ba-46c1-a5c2-9acdecdfcce3',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'dcaaa3'},body:JSON.stringify({sessionId:'dcaaa3',location:'game.js:drawParachuteIntro',message:'Parachute draw order',data:{phase:levelPhase,friendY:friendParachuteY,ploffY:ploffersonParachuteY,animTime},timestamp:Date.now(),hypothesisId:'H2'})}).catch(()=>{});
+    // #endregion
+    drawParachuteCanopyOnly(friendParachuteX, friendParachuteY);
+    drawParachuteCanopyOnly(ploffersonParachuteX, ploffersonParachuteY);
+    drawParachuteRopesOnly(friendParachuteX, friendParachuteY);
+    drawParachuteRopesOnly(ploffersonParachuteX, ploffersonParachuteY);
     const color = selectedCharacter ? selectedCharacter.color : '#8b7355';
     const label = selectedCharacter ? selectedCharacter.name.charAt(0) : '?';
     drawSoldier(ctx, friendParachuteX, friendParachuteY, color, label, animTime, false);
@@ -617,32 +730,174 @@ function drawPlane(x, y) {
   ctx.stroke();
 }
 
-function drawParachuteCanopy(characterX, characterY) {
+/** Parachute: domed canopy with scalloped base and panel lines (no ropes). */
+function drawParachuteCanopyOnly(characterX, characterY) {
   const w = CONFIG.CHAR_SIZE;
   const cx = characterX + w / 2;
-  const canopyY = characterY - 28;
-  const canopyW = 36;
-  const canopyH = 18;
+  const canopyTopY = characterY - 28;
+  const canopyW = 44;
+  const domeH = 14;
+  const baseY = canopyTopY + domeH;
   ctx.strokeStyle = '#1a1a1a';
   ctx.lineWidth = 1.5;
   ctx.fillStyle = '#e74c3c';
   ctx.beginPath();
-  ctx.moveTo(cx - canopyW / 2, canopyY + canopyH);
-  ctx.lineTo(cx, canopyY);
-  ctx.lineTo(cx + canopyW / 2, canopyY + canopyH);
+  // Scalloped base (wavy bottom edge, closest to the character)
+  ctx.moveTo(cx - canopyW / 2, baseY);
+  ctx.quadraticCurveTo(cx - canopyW / 4, baseY + 3, cx, baseY - 2);
+  ctx.quadraticCurveTo(cx + canopyW / 4, baseY + 3, cx + canopyW / 2, baseY);
+  // Right edge up to dome
+  ctx.lineTo(cx + canopyW / 2, canopyTopY + domeH / 2);
+  // Dome arc = upper half of circle (bulges upward, away from character)
+  ctx.arc(cx, canopyTopY + domeH / 2, canopyW / 2, 0, Math.PI, true);
+  // Left edge back down to base
+  ctx.lineTo(cx - canopyW / 2, baseY);
   ctx.closePath();
   ctx.fill();
   ctx.stroke();
-  ctx.strokeStyle = '#2c3e50';
+  // Panel segments (vertical curved lines)
+  const panelCount = 5;
+  ctx.strokeStyle = 'rgba(0,0,0,0.35)';
   ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(cx - 8, canopyY + canopyH);
-  ctx.lineTo(characterX + 10, characterY);
-  ctx.moveTo(cx + 8, canopyY + canopyH);
-  ctx.lineTo(characterX + w - 10, characterY);
-  ctx.moveTo(cx, canopyY + canopyH - 2);
-  ctx.lineTo(cx, characterY + 4);
-  ctx.stroke();
+  for (let i = 1; i < panelCount; i++) {
+    const t = i / panelCount;
+    const px = cx - canopyW / 2 + t * canopyW;
+    ctx.beginPath();
+    ctx.moveTo(px, baseY);
+    ctx.quadraticCurveTo(px + (cx - px) * 0.15, (canopyTopY + baseY) / 2, cx + (px - cx) * 0.6, canopyTopY + domeH * 0.4);
+    ctx.stroke();
+  }
+}
+
+/** Parachute: harness ropes from scalloped canopy base to torso (converging to center). */
+function drawParachuteRopesOnly(characterX, characterY) {
+  const w = CONFIG.CHAR_SIZE;
+  const cx = characterX + w / 2;
+  const canopyTopY = characterY - 28;
+  const domeH = 14;
+  const baseY = canopyTopY + domeH;
+  const canopyW = 44;
+  const torsoTop = characterY + 21;
+  const harnessY = torsoTop + 2;
+  ctx.strokeStyle = '#5a6a6a';
+  ctx.lineWidth = 1;
+  const ropeCount = 7;
+  for (let i = 0; i < ropeCount; i++) {
+    const t = (i + 0.5) / ropeCount;
+    const bx = cx - canopyW / 2 + t * canopyW;
+    const by = baseY - (t === 0.5 ? 2 : 0) + (Math.abs(t - 0.5) * 2);
+    ctx.beginPath();
+    ctx.moveTo(bx, by);
+    ctx.lineTo(cx + (bx - cx) * 0.4, harnessY);
+    ctx.stroke();
+  }
+}
+
+function drawParachuteCanopy(characterX, characterY) {
+  drawParachuteCanopyOnly(characterX, characterY);
+  drawParachuteRopesOnly(characterX, characterY);
+}
+
+/** Spawn one Level 2 obstacle: always a building; often a mine above low buildings (upper half, random height) */
+function spawnL2Obstacle() {
+  const gap = CONFIG.L2_SPAWN_MIN + Math.random() * (CONFIG.L2_SPAWN_MAX - CONFIG.L2_SPAWN_MIN);
+  const width = CONFIG.L2_BUILDING_WIDTH_MIN + Math.random() * (CONFIG.L2_BUILDING_WIDTH_MAX - CONFIG.L2_BUILDING_WIDTH_MIN);
+  const height = CONFIG.L2_BUILDING_HEIGHT_MIN + Math.random() * (CONFIG.L2_BUILDING_HEIGHT_MAX - CONFIG.L2_BUILDING_HEIGHT_MIN);
+  const worldX = nextL2ObstacleAt;
+  l2Obstacles.push({
+    type: 'building',
+    worldX,
+    width,
+    height,
+  });
+  nextL2ObstacleAt += gap + width;
+  const isLow = height < CONFIG.L2_BUILDING_LOW_THRESHOLD;
+  if (isLow && Math.random() < 0.82) {
+    const mineY = CONFIG.L2_MINE_Y_MIN + Math.random() * (CONFIG.L2_MINE_Y_MAX - CONFIG.L2_MINE_Y_MIN);
+    l2Obstacles.push({
+      type: 'mine',
+      worldX: worldX + width / 2 - CONFIG.L2_MINE_RADIUS,
+      y: mineY,
+      radius: CONFIG.L2_MINE_RADIUS,
+    });
+  }
+}
+
+function updateLevel2(dt) {
+  const elapsed = getLevelElapsed();
+  const inIntro = elapsed < CONFIG.L2_INTRO_DURATION;
+
+  if (inIntro) {
+    timerDisplay.textContent = '0:00';
+    return;
+  }
+
+  worldScrollX += CONFIG.L2_SCROLL_SPEED * dt;
+
+  if (l2ExplosionStartTime > 0) {
+    if ((performance.now() / 1000) - l2ExplosionStartTime >= L2_EXPLOSION_DURATION) {
+      triggerGameOver();
+    }
+    return;
+  }
+
+  if (keys.heliFlap) {
+    heliVelY = CONFIG.HELI_FLAP_VELOCITY;
+    keys.heliFlap = false;
+  }
+  heliVelY += CONFIG.HELI_GRAVITY * dt;
+  heliVelY = Math.max(-320, Math.min(320, heliVelY));
+  heliY += heliVelY * dt;
+  heliY = Math.max(0, Math.min(CONFIG.CANVAS_HEIGHT - CONFIG.HELI_SIZE, heliY));
+
+  if (heliY + CONFIG.HELI_SIZE > CONFIG.GROUND_Y) {
+    level2ScoreAtDeath = Math.floor(elapsed);
+    l2ExplosionStartTime = performance.now() / 1000;
+    return;
+  }
+
+  while (nextL2ObstacleAt < worldScrollX + CONFIG.CANVAS_WIDTH + 150) spawnL2Obstacle();
+  l2Obstacles = l2Obstacles.filter((o) => {
+    if (o.type === 'building') return o.worldX + o.width > worldScrollX - 50;
+    return o.worldX + o.radius * 2 > worldScrollX - 50;
+  });
+
+  const heliLeft = CONFIG.HELI_FIXED_X;
+  const heliRight = CONFIG.HELI_FIXED_X + CONFIG.HELI_SIZE;
+  const heliTop = heliY;
+  const heliBottom = heliY + CONFIG.HELI_SIZE;
+  const heliCx = CONFIG.HELI_FIXED_X + CONFIG.HELI_SIZE / 2;
+  const heliCy = heliY + CONFIG.HELI_SIZE / 2;
+
+  for (const o of l2Obstacles) {
+    if (o.type === 'building') {
+      const screenX = o.worldX - worldScrollX;
+      if (screenX + o.width < heliLeft || screenX > heliRight) continue;
+      const top = CONFIG.GROUND_Y - o.height;
+      const bottom = CONFIG.GROUND_Y;
+      if (heliRight > screenX && heliLeft < screenX + o.width && heliBottom > top && heliTop < bottom) {
+        level2ScoreAtDeath = Math.floor(elapsed);
+        l2ExplosionStartTime = performance.now() / 1000;
+        return;
+      }
+    } else {
+      const screenX = o.worldX - worldScrollX;
+      const dx = heliCx - (screenX + o.radius);
+      const dy = heliCy - o.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < o.radius + CONFIG.HELI_SIZE / 2) {
+        level2ScoreAtDeath = Math.floor(elapsed);
+        l2ExplosionStartTime = performance.now() / 1000;
+        return;
+      }
+    }
+  }
+
+  const mins = Math.floor(elapsed / 60);
+  const secs = Math.floor(elapsed % 60);
+  timerDisplay.textContent = `${mins}:${secs.toString().padStart(2, '0')}`;
+
+  if (elapsed >= CONFIG.LEVEL2_DURATION) triggerWin();
 }
 
 /**
@@ -650,6 +905,16 @@ function drawParachuteCanopy(characterX, characterY) {
  * @param {number} dt - Delta time in seconds
  */
 function update(dt) {
+  if (currentLevel === 2) {
+    updateLevel2(dt);
+    return;
+  }
+  if (levelPhase === 'intro_tooltip') {
+    if (getLevelElapsed() >= CONFIG.L1_INTRO_DURATION) {
+      levelPhase = 'parachute';
+    }
+    return;
+  }
   if (levelPhase === 'parachute') {
     updateParachuteIntro(dt);
     return;
@@ -798,7 +1063,7 @@ function drawScrollingGround() {
 }
 
 /**
- * Draw obstacles: cars, tanks, 1-story and 2-story houses (flat roof)
+ * Draw obstacles: jeeps, tanks, 1-story and 2-story houses (flat roof)
  */
 function drawObstacles() {
   const groundY = CONFIG.GROUND_Y;
@@ -806,8 +1071,8 @@ function drawObstacles() {
     const screenX = o.worldX - worldScrollX;
     if (screenX + o.width < 0 || screenX > CONFIG.CANVAS_WIDTH) continue;
 
-    if (o.type === 'car') {
-      drawCar(screenX, groundY, o.width, o.height);
+    if (o.type === 'jeep') {
+      drawJeep(screenX, groundY, o.width, o.height);
     } else if (o.type === 'tank') {
       drawTank(screenX, groundY, o.width, o.height);
     } else if (o.type === 'house1' || o.type === 'house2') {
@@ -816,31 +1081,70 @@ function drawObstacles() {
   }
 }
 
-function drawCar(screenX, groundY, w, h) {
+function drawJeep(screenX, groundY, w, h) {
   const top = groundY - h;
   ctx.strokeStyle = '#1a1a1a';
   ctx.lineWidth = 1.5;
-  ctx.fillStyle = '#2c3e50';
-  ctx.fillRect(screenX, top, w, h * 0.5);
-  ctx.strokeRect(screenX, top, w, h * 0.5);
-  ctx.fillStyle = '#c0392b';
-  ctx.fillRect(screenX + 2, top + 2, w - 4, h * 0.45);
-  ctx.strokeRect(screenX + 2, top + 2, w - 4, h * 0.45);
+  // Olive / military green body
+  ctx.fillStyle = '#4a5d3a';
+  ctx.fillRect(screenX, top + h * 0.22, w, h * 0.78);
+  ctx.strokeRect(screenX, top + h * 0.22, w, h * 0.78);
+  // Flat front (grille)
+  ctx.fillStyle = '#3d4d2e';
+  ctx.fillRect(screenX, top + h * 0.2, w * 0.22, h * 0.82);
+  ctx.strokeRect(screenX, top + h * 0.2, w * 0.22, h * 0.82);
+  // Grille slots (vertical lines)
+  for (let i = 0; i < 4; i++) {
+    const gx = screenX + 4 + (i / 3) * (w * 0.14);
+    ctx.strokeStyle = '#2a3520';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(gx, top + h * 0.35);
+    ctx.lineTo(gx, groundY - 4);
+    ctx.stroke();
+  }
+  ctx.strokeStyle = '#1a1a1a';
+  ctx.lineWidth = 1.5;
+  // Round headlights
+  ctx.fillStyle = '#f1c40f';
+  ctx.beginPath();
+  ctx.arc(screenX + w * 0.06, top + h * 0.45, 3, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(screenX + w * 0.06, top + h * 0.7, 3, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  // Cabin: open top, windshield frame
+  ctx.strokeStyle = '#2a3520';
+  ctx.fillStyle = 'rgba(60,80,50,0.4)';
+  ctx.fillRect(screenX + w * 0.24, top + h * 0.25, w * 0.52, h * 0.5);
+  ctx.strokeRect(screenX + w * 0.24, top + h * 0.25, w * 0.52, h * 0.5);
+  ctx.beginPath();
+  ctx.moveTo(screenX + w * 0.24, top + h * 0.5);
+  ctx.lineTo(screenX + w * 0.38, top + h * 0.28);
+  ctx.lineTo(screenX + w * 0.76, top + h * 0.28);
+  ctx.lineTo(screenX + w * 0.76, top + h * 0.5);
+  ctx.stroke();
+  // Star on hood
+  ctx.fillStyle = '#8b7355';
+  ctx.beginPath();
+  ctx.moveTo(screenX + w * 0.5, top + h * 0.6);
+  ctx.lineTo(screenX + w * 0.52, top + h * 0.68);
+  ctx.lineTo(screenX + w * 0.48, top + h * 0.68);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  // Big wheels (4 visible as circles)
+  const wheelR = Math.min(7, h * 0.36);
   ctx.fillStyle = '#1a1a1a';
-  ctx.fillRect(screenX + w * 0.15, top + h * 0.2, w * 0.25, h * 0.22);
-  ctx.fillRect(screenX + w * 0.6, top + h * 0.2, w * 0.25, h * 0.22);
-  ctx.fillStyle = '#34495e';
-  ctx.fillRect(screenX + 4, top + 4, w - 8, h * 0.18);
-  ctx.fillStyle = '#2c3e50';
-  const wheelR = Math.min(6, h * 0.35);
-  ctx.beginPath();
-  ctx.arc(screenX + w * 0.22, groundY - wheelR, wheelR, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.arc(screenX + w * 0.78, groundY - wheelR, wheelR, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.stroke();
+  ctx.strokeStyle = '#2c2c2c';
+  [0.2, 0.42, 0.58, 0.8].forEach((frac) => {
+    ctx.beginPath();
+    ctx.arc(screenX + w * frac, groundY - wheelR, wheelR, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+  });
 }
 
 function drawTank(screenX, groundY, w, h) {
@@ -914,7 +1218,17 @@ function draw() {
   ctx.save();
   ctx.scale(scaleX, scaleY);
 
-  if (levelPhase === 'parachute') {
+  if (currentLevel === 2) {
+    drawLevel2();
+    ctx.restore();
+    return;
+  }
+  if (levelPhase === 'intro_tooltip') {
+    drawSky();
+    drawDistantSilhouettes();
+    drawParallaxBackground();
+    drawScrollingGround();
+  } else if (levelPhase === 'parachute') {
     drawParachuteIntro();
   } else {
     drawSky();
@@ -933,89 +1247,373 @@ function draw() {
   ctx.restore();
 }
 
+function drawLevel2() {
+  drawSky();
+  drawDistantSilhouettes();
+  drawParallaxBackground();
+  drawScrollingGround();
+  const groundY = CONFIG.GROUND_Y;
+  for (const o of l2Obstacles) {
+    const screenX = o.worldX - worldScrollX;
+    if (o.type === 'building') {
+      if (screenX + o.width < 0 || screenX > CONFIG.CANVAS_WIDTH) continue;
+      drawL2Building(screenX, groundY, o.width, o.height);
+    } else {
+      if (screenX + o.radius * 2 + CONFIG.L2_BALLOON_SIZE < 0 || screenX > CONFIG.CANVAS_WIDTH + 20) continue;
+      drawL2Mine(screenX, o.y, o.radius);
+    }
+  }
+  const elapsed = getLevelElapsed();
+  const inIntro = elapsed < CONFIG.L2_INTRO_DURATION;
+  let heliDrawX = CONFIG.HELI_FIXED_X;
+  if (inIntro) {
+    const t = Math.min(1, elapsed / CONFIG.L2_INTRO_DURATION);
+    const easeOut = 1 - (1 - t) * (1 - t);
+    heliDrawX = -60 + (CONFIG.HELI_FIXED_X + 60) * easeOut;
+  }
+  if (l2ExplosionStartTime > 0) {
+    const explosionT = (performance.now() / 1000) - l2ExplosionStartTime;
+    const progress = Math.min(1, explosionT / L2_EXPLOSION_DURATION);
+    const cx = heliDrawX + CONFIG.HELI_SIZE / 2;
+    const cy = heliY + CONFIG.HELI_SIZE / 2;
+    const baseR = CONFIG.HELI_SIZE * 0.5;
+    const maxR = CONFIG.HELI_SIZE * 2.2;
+    const r = baseR + (maxR - baseR) * progress;
+    const alpha = 1 - progress * progress;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+    g.addColorStop(0, 'rgba(255,180,50,0.9)');
+    g.addColorStop(0.4, 'rgba(255,100,0,0.6)');
+    g.addColorStop(0.7, 'rgba(220,50,0,0.3)');
+    g.addColorStop(1, 'rgba(180,0,0,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+    ctx.restore();
+  } else {
+    drawHelicopter(heliDrawX, heliY);
+  }
+}
+
+function drawL2Building(x, groundY, w, h) {
+  const top = groundY - h;
+  ctx.strokeStyle = '#2c2c2c';
+  ctx.lineWidth = 1.5;
+  ctx.fillStyle = '#5a6a7a';
+  ctx.fillRect(x, top, w, h);
+  ctx.strokeRect(x, top, w, h);
+  ctx.fillStyle = '#37474f';
+  const winW = Math.min(14, w * 0.25);
+  const winH = 12;
+  for (let row = 0; row < Math.floor(h / 28); row++) {
+    for (let col = 0; col < Math.floor(w / (winW + 4)); col++) {
+      ctx.fillRect(x + 4 + col * (winW + 4), top + 6 + row * 28, winW, winH);
+    }
+  }
+}
+
+function drawL2Mine(x, y, radius) {
+  const balloonY = y - CONFIG.L2_BALLOON_SIZE - radius - 6;
+  const cx = x + radius;
+  ctx.strokeStyle = '#1a1a1a';
+  ctx.lineWidth = 1.5;
+  ctx.fillStyle = '#e74c3c';
+  ctx.beginPath();
+  ctx.arc(cx, balloonY, CONFIG.L2_BALLOON_SIZE / 2, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  ctx.strokeStyle = '#2c3e50';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(cx - 4, balloonY + CONFIG.L2_BALLOON_SIZE / 2);
+  ctx.lineTo(cx, y - radius);
+  ctx.moveTo(cx + 4, balloonY + CONFIG.L2_BALLOON_SIZE / 2);
+  ctx.lineTo(cx, y - radius);
+  ctx.stroke();
+  ctx.fillStyle = '#2a2a2a';
+  ctx.strokeStyle = '#1a1a1a';
+  ctx.beginPath();
+  ctx.arc(cx, y, radius, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  const spikeCount = 10;
+  const spikeLen = radius * 1.1;
+  ctx.strokeStyle = '#1a1a1a';
+  ctx.lineWidth = 2;
+  for (let i = 0; i < spikeCount; i++) {
+    const angle = (i / spikeCount) * Math.PI * 2;
+    const sx = cx + Math.cos(angle) * radius;
+    const sy = y + Math.sin(angle) * radius;
+    const ex = cx + Math.cos(angle) * spikeLen;
+    const ey = y + Math.sin(angle) * spikeLen;
+    ctx.beginPath();
+    ctx.moveTo(sx, sy);
+    ctx.lineTo(ex, ey);
+    ctx.stroke();
+  }
+}
+
+function drawHelicopter(x, y) {
+  const w = CONFIG.HELI_SIZE;
+  const h = CONFIG.HELI_SIZE * 0.9;
+  const cx = x + w / 2;
+  const cy = y + h / 2;
+
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.scale(-1, 1);
+  ctx.translate(-cx, -cy);
+
+  // Rotor angle: spin main + tail rotor (tail 3x faster for effect)
+  const t = performance.now() / 1000;
+  const mainRotorAngle = t * 12;
+  const tailRotorAngle = t * 24;
+
+  ctx.lineWidth = 2;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+
+  // —— Fuselage (egg-shaped body) ——
+  ctx.fillStyle = '#3d5a3d';
+  ctx.strokeStyle = '#1e3d1e';
+  ctx.beginPath();
+  ctx.ellipse(cx, cy + 2, w * 0.42, h * 0.48, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+
+  // Side stripes + star (character)
+  ctx.strokeStyle = '#2a4a2a';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(cx - 6, y + h * 0.35);
+  ctx.lineTo(cx - 6, y + h * 0.65);
+  ctx.moveTo(cx - 2, y + h * 0.4);
+  ctx.lineTo(cx - 2, y + h * 0.6);
+  ctx.moveTo(cx + 2, y + h * 0.35);
+  ctx.lineTo(cx + 2, y + h * 0.65);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(cx - 4, y + h * 0.52, 3, 0, Math.PI * 2);
+  ctx.stroke();
+
+  // Cockpit (lighter oval)
+  ctx.fillStyle = 'rgba(180,220,200,0.6)';
+  ctx.strokeStyle = '#2a4a2a';
+  ctx.beginPath();
+  ctx.ellipse(cx - 2, y + h * 0.32, 6, 8, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+
+  // —— Tail boom ——
+  ctx.strokeStyle = '#1e3d1e';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(cx + w * 0.38, cy);
+  ctx.lineTo(cx + w * 0.7, cy - 2);
+  ctx.stroke();
+
+  // Tail fin
+  ctx.beginPath();
+  ctx.moveTo(cx + w * 0.7, cy - 2);
+  ctx.lineTo(cx + w * 0.72, cy - 8);
+  ctx.lineTo(cx + w * 0.78, cy - 2);
+  ctx.closePath();
+  ctx.fillStyle = '#3d5a3d';
+  ctx.fill();
+  ctx.stroke();
+
+  // —— Tail rotor (spinning) ——
+  ctx.save();
+  ctx.translate(cx + w * 0.74, cy - 6);
+  ctx.rotate(tailRotorAngle);
+  ctx.strokeStyle = '#1a1a1a';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(-6, 0);
+  ctx.lineTo(6, 0);
+  ctx.moveTo(0, -4);
+  ctx.lineTo(0, 4);
+  ctx.stroke();
+  ctx.restore();
+
+  // —— Main rotor mast ——
+  ctx.strokeStyle = '#2a352a';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(cx, y + h * 0.08);
+  ctx.lineTo(cx, y - 2);
+  ctx.stroke();
+
+  // —— Main rotor (spinning) ——
+  ctx.save();
+  ctx.translate(cx, y - 2);
+  ctx.rotate(mainRotorAngle);
+  ctx.strokeStyle = '#1a1a1a';
+  ctx.fillStyle = 'rgba(40,50,40,0.9)';
+  ctx.lineWidth = 2;
+  const bladeLen = w * 0.52;
+  ctx.beginPath();
+  ctx.ellipse(0, 0, bladeLen, 3, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(-bladeLen, 0);
+  ctx.lineTo(bladeLen, 0);
+  ctx.stroke();
+  ctx.restore();
+
+  // —— Skids ——
+  ctx.strokeStyle = '#2a352a';
+  ctx.lineWidth = 2;
+  const skidY = y + h * 0.88;
+  ctx.beginPath();
+  ctx.moveTo(cx - w * 0.32, skidY);
+  ctx.quadraticCurveTo(cx - w * 0.2, skidY - 4, cx, skidY - 2);
+  ctx.quadraticCurveTo(cx + w * 0.2, skidY, cx + w * 0.32, skidY);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(cx - w * 0.22, skidY);
+  ctx.lineTo(cx - w * 0.22, skidY + 6);
+  ctx.moveTo(cx + w * 0.22, skidY);
+  ctx.lineTo(cx + w * 0.22, skidY + 6);
+  ctx.stroke();
+
+  ctx.restore();
+}
+
 /**
- * Soldier-style character: helmet, vest, legs with walk cycle; optional rifle.
+ * Chibi soldier: big head, helmet + goggles, olive uniform, walk cycle, rifle.
  * @param {CanvasRenderingContext2D} ctx
  * @param {number} x - Left of character (screen)
  * @param {number} y - Top of character (screen)
- * @param {string} color - Body/vest color
- * @param {string} label - One letter for ID
+ * @param {string} color - Vest/strap tint (olive base; elite = darker green)
+ * @param {string} label - One letter for ID (on vest)
  * @param {number} animTime - Seconds since level start for walk cycle
- * @param {boolean} isElite - If true, bandana + tactical (Plofferson)
+ * @param {boolean} isElite - If true, Plofferson (slightly different accent)
  */
 function drawSoldier(ctx, x, y, color, label, animTime, isElite) {
-  const w = CONFIG.CHAR_SIZE;
-  const h = CONFIG.CHAR_SIZE;
+  ctx.save();
+
+  const w = CONFIG.CHAR_SIZE;   // 40
+  const h = CONFIG.CHAR_SIZE;   // 40
   const cx = x + w / 2;
-  const legW = 8;
-  const legH = 12;
+
+  // All Y positions relative to character top (y); feet must be at y + h
+  const headTop = y + 1;
+  const headH = 20;
+  const headCx = cx;
+  const headCy = headTop + headH / 2;
+  const bodyY = y + 21;   // fixed: head 1..21, body starts 21
+  const bodyH = 11;
+  const legY = y + 32;    // fixed: body 21..32, legs 32..40
+  const legH = 8;         // fixed: from y+32 to y+40
   const walkPhase = Math.floor(animTime * 6) % 2;
-  const legOffset = walkPhase === 0 ? 4 : -4;
-
-  ctx.strokeStyle = '#000';
-  ctx.lineWidth = 1.5;
-
-  // Head: helmet (rounded) or bandana (elite)
-  const headTop = y + 2;
-  const headH = 12;
-  if (isElite) {
-    ctx.fillStyle = '#8b0000';
-    ctx.beginPath();
-    ctx.roundRect(x + 3, headTop, w - 6, headH - 2, 2);
-    ctx.fill();
-    ctx.stroke();
-    ctx.fillStyle = '#1a3d0a';
-    ctx.beginPath();
-    ctx.arc(cx, headTop + 6, 5, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.stroke();
-    ctx.fillStyle = '#2d5016';
-    ctx.fillRect(x + 4, headTop + 8, w - 8, 4);
-  } else {
-    ctx.fillStyle = '#4a4a4a';
-    ctx.beginPath();
-    ctx.roundRect(x + 4, headTop, w - 8, headH, 3);
-    ctx.fill();
-    ctx.stroke();
-    ctx.fillStyle = '#2a2a2a';
-    ctx.fillRect(x + 6, headTop + 2, 4, 3);
-    ctx.fillRect(x + w - 10, headTop + 2, 4, 3);
-    ctx.fillStyle = '#c4a574';
-    ctx.beginPath();
-    ctx.arc(cx, headTop + 7, 4, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.stroke();
-    ctx.fillStyle = '#fff';
-    ctx.font = 'bold 8px "Press Start 2P"';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(label, cx, headTop + 7);
+  let legOffset = walkPhase === 0 ? 3 : -3;
+  if (typeof levelPhase !== 'undefined' && levelPhase === 'parachute') {
+    legOffset = 0;
   }
 
-  // Vest / body armor
-  const bodyY = headTop + headH;
-  const bodyH = 14;
-  ctx.fillStyle = isElite ? '#1a3d0a' : color;
-  ctx.fillRect(x + 5, bodyY, w - 10, bodyH);
-  ctx.strokeRect(x + 5, bodyY, w - 10, bodyH);
-  ctx.fillStyle = isElite ? '#2d5016' : 'rgba(0,0,0,0.15)';
-  ctx.fillRect(cx - 2, bodyY + 2, 4, bodyH - 4);
+  // #region agent log
+  if (typeof levelPhase !== 'undefined' && levelPhase === 'parachute') {
+    fetch('http://127.0.0.1:7243/ingest/2a1a30c2-e1ba-46c1-a5c2-9acdecdfcce3',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'dcaaa3'},body:JSON.stringify({sessionId:'dcaaa3',location:'game.js:drawSoldier',message:'Soldier parachute pose',data:{legOffset:0,runId:'post-fix'},timestamp:Date.now(),hypothesisId:'H1'})}).catch(()=>{});
+  }
+  // #endregion
 
-  // Rifle (small silhouette on right side)
-  ctx.fillStyle = '#2a2a2a';
-  ctx.fillRect(x + w - 4, bodyY + 2, 6, bodyH - 2);
-  ctx.strokeRect(x + w - 4, bodyY + 2, 6, bodyH - 2);
+  // —— Head: Plofferson uses photo (larger than player head); others use drawn chibi head ——
+  const headRadiusX = w * 0.42;
+  const headRadiusY = headH * 0.52;
+  const ploffHeadRx = headRadiusX * 1.3;
+  const ploffHeadRy = headRadiusY * 1.3;
+  if (isElite && ploffersonHeadImage && ploffersonHeadImage.complete && ploffersonHeadImage.naturalWidth) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.ellipse(headCx, headCy, ploffHeadRx, ploffHeadRy, 0, 0, Math.PI * 2);
+    ctx.closePath();
+    ctx.clip();
+    ctx.drawImage(ploffersonHeadImage, headCx - ploffHeadRx, headCy - ploffHeadRy, ploffHeadRx * 2, ploffHeadRy * 2);
+    ctx.restore();
+  } else {
+    ctx.fillStyle = isElite ? '#3d4a28' : '#5a6b3d';
+    ctx.beginPath();
+    ctx.ellipse(headCx, headCy, headRadiusX, headRadiusY, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#7eb8da';
+    ctx.beginPath();
+    ctx.ellipse(headCx - 5, headTop + 5, 5, 3.5, 0, 0, Math.PI * 2);
+    ctx.ellipse(headCx + 5, headTop + 5, 5, 3.5, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#e0b890';
+    ctx.beginPath();
+    ctx.ellipse(headCx, headCy + 2, w * 0.28, headH * 0.4, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#000';
+    ctx.beginPath();
+    ctx.arc(headCx - 4, headCy + 3, 2, 0, Math.PI * 2);
+    ctx.arc(headCx + 4, headCy + 3, 2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.arc(headCx - 4.5, headCy + 2.2, 0.8, 0, Math.PI * 2);
+    ctx.arc(headCx + 3.5, headCy + 2.2, 0.8, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#8b6914';
+    ctx.beginPath();
+    ctx.arc(headCx, headCy + 6, 2, 0.2 * Math.PI, 0.8 * Math.PI);
+    ctx.lineTo(headCx, headCy + 6);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(220,140,120,0.5)';
+    ctx.beginPath();
+    ctx.arc(headCx - 7, headCy + 4, 2, 0, Math.PI * 2);
+    ctx.arc(headCx + 7, headCy + 4, 2, 0, Math.PI * 2);
+    ctx.fill();
+  }
 
-  // Legs + boots
-  const baseY = y + h - legH;
-  ctx.fillStyle = isElite ? '#1a3d0a' : '#5c4a3a';
-  ctx.fillRect(x + 6 + legOffset, baseY, legW, legH - 2);
-  ctx.strokeRect(x + 6 + legOffset, baseY, legW, legH - 2);
-  ctx.fillRect(x + w - 14 - legOffset, baseY, legW, legH - 2);
-  ctx.strokeRect(x + w - 14 - legOffset, baseY, legW, legH - 2);
-  ctx.fillStyle = '#3d3025';
-  ctx.fillRect(x + 5 + legOffset, baseY + legH - 3, legW + 2, 3);
-  ctx.fillRect(x + w - 15 - legOffset, baseY + legH - 3, legW + 2, 3);
+  // —— Body: olive uniform — fill only, no strokeRect ——
+  ctx.fillStyle = isElite ? '#3d4a28' : '#5a6b3d';
+  ctx.fillRect(x + 6, bodyY, w - 12, bodyH);
+  ctx.fillStyle = '#3d4a28';
+  ctx.fillRect(cx - 5, bodyY + 1, 10, bodyH - 2);
+
+  // Label on vest
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 6px "Press Start 2P"';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(label, cx, bodyY + bodyH / 2);
+
+  // Rifle (black) — fill only
+  ctx.fillStyle = '#1a1a1a';
+  ctx.fillRect(x + w - 6, bodyY + 2, 8, 4);
+  ctx.fillRect(x + w - 8, bodyY + 3, 4, 2);
+
+  // —— Legs + boots: always at bottom of sprite (legY = y+32 to y+40) ——
+  const bootH = 4;
+  const isParachuting = typeof levelPhase !== 'undefined' && levelPhase === 'parachute';
+  const shinH = legH - bootH;  // 4
+  if (isParachuting) {
+    const legW = 4;
+    const bootW = 5;
+    const leftX = x + 10;
+    const rightX = x + w - 14;
+    ctx.fillStyle = isElite ? '#3d4a28' : '#5a6b3d';
+    ctx.fillRect(leftX, legY, legW, shinH);
+    ctx.fillRect(rightX, legY, legW, shinH);
+    ctx.fillStyle = '#2a2a2a';
+    ctx.fillRect(leftX, legY + shinH, bootW, bootH);
+    ctx.fillRect(rightX - 1, legY + shinH, bootW, bootH);
+  } else {
+    ctx.fillStyle = isElite ? '#3d4a28' : '#5a6b3d';
+    ctx.fillRect(x + 8 + legOffset, legY, 7, shinH);
+    ctx.fillRect(x + w - 15 - legOffset, legY, 7, shinH);
+    ctx.fillStyle = '#2a2a2a';
+    ctx.fillRect(x + 7 + legOffset, legY + shinH, 9, bootH);
+    ctx.fillRect(x + w - 16 - legOffset, legY + shinH, 9, bootH);
+  }
+
+  ctx.restore();
 }
 
 /**
@@ -1038,14 +1636,14 @@ function gameLoop(time) {
 function initGameOverAndWin() {
   document.getElementById('btn-retry').addEventListener('click', () => {
     setState(GameState.PLAYING, 'game-screen');
-    requestAnimationFrame(() => startLevel1());
+    requestAnimationFrame(() => currentLevel === 2 ? startLevel2() : startLevel1());
   });
   document.getElementById('btn-gameover-menu').addEventListener('click', () => {
     setState(GameState.MENU, 'main-menu');
   });
   document.getElementById('btn-win-retry').addEventListener('click', () => {
     setState(GameState.PLAYING, 'game-screen');
-    requestAnimationFrame(() => startLevel1());
+    requestAnimationFrame(() => currentLevel === 2 ? startLevel2() : startLevel1());
   });
   document.getElementById('btn-win-menu').addEventListener('click', () => {
     setState(GameState.MENU, 'main-menu');
@@ -1065,12 +1663,16 @@ function initStartScreen() {
  * Initialize the game: menus, input, and navigation
  */
 function init() {
+  ploffersonHeadImage = new Image();
+  ploffersonHeadImage.src = 'assets/plofferson-head.png';
+  try { level1Completed = localStorage.getItem('stayClose_level1Completed') === '1'; } catch (_) {}
   initStartScreen();
   initMainMenu();
   initChoosePlayer();
   initModal();
   initInput();
   initTouchControls();
+  initTouchControlsL2();
   initGameOverAndWin();
   window.addEventListener('resize', () => {
     if (state === GameState.PLAYING) resizeCanvas();

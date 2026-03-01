@@ -21,8 +21,8 @@ const CONFIG = {
   PLOFFERSON_WANDER_SPEED: 1.2,
   /** How far friend can be off left of screen before game over (stuck / left behind) */
   FRIEND_OFF_LEFT_MARGIN: 40,
-  /** Ground level (Y) for characters on screen — higher = less empty sky */
-  GROUND_Y: 400,
+  /** Ground level (Y) for characters on screen — set from CANVAS_HEIGHT below (~65%) */
+  GROUND_Y: 416,
   /** Narrow portrait (Flappy Bird style): less horizontal view, less time to react */
   CANVAS_WIDTH: 360,
   CANVAS_HEIGHT: 640,
@@ -61,6 +61,7 @@ const CONFIG = {
   /** Seconds of invincibility after respawn */
   INVINCIBILITY_DURATION: 2,
 };
+CONFIG.GROUND_Y = Math.floor(CONFIG.CANVAS_HEIGHT * 0.65);
 
 // TRENCH_CONFIG — adjust positions and size here. Keep trench positions outside 80px of early obstacle spawn (e.g. first spawn ~120 or ~580).
 /** Trenches (loopgraven): width ~1.5x player, depth ~2x player. Positions in world X. */
@@ -406,7 +407,8 @@ function isGroundAt(friendWX) {
 }
 
 /**
- * Resize canvas to fill its container (full viewport on mobile); keeps logical size 900x500.
+ * Resize canvas to match container pixel size (viewport on mobile).
+ * Game always draws at CONFIG.CANVAS_WIDTH x CONFIG.CANVAS_HEIGHT; draw() scales to fit.
  */
 function resizeCanvas() {
   const wrap = canvas.parentElement;
@@ -1298,10 +1300,15 @@ function drawHouse(screenX, groundY, w, h, isTwoStory) {
  * Game logic uses logical size (CONFIG); scale to fill canvas (full viewport on mobile).
  */
 function draw() {
-  const scaleX = canvas.width / CONFIG.CANVAS_WIDTH;
-  const scaleY = canvas.height / CONFIG.CANVAS_HEIGHT;
+  const scale = Math.min(
+    canvas.width / CONFIG.CANVAS_WIDTH,
+    canvas.height / CONFIG.CANVAS_HEIGHT
+  );
+  const offsetX = (canvas.width - CONFIG.CANVAS_WIDTH * scale) / 2;
+  const offsetY = (canvas.height - CONFIG.CANVAS_HEIGHT * scale) / 2;
   ctx.save();
-  ctx.scale(scaleX, scaleY);
+  ctx.translate(offsetX, offsetY);
+  ctx.scale(scale, scale);
 
   if (levelPhase === 'intro_tooltip') {
     drawSky();

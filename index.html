@@ -20,24 +20,30 @@
     </div>
   </div>
 
-  <!-- Main Menu -->
-  <div id="main-menu" class="screen">
-    <h1 class="game-title">Stay Close</h1>
-    <p class="subtitle">Don't wander off... again.</p>
-    <p id="selected-player-display" class="selected-player"></p>
-    <div class="menu-buttons">
-      <button id="btn-choose-player" class="menu-btn">Choose Player</button>
-      <button id="btn-level1" class="menu-btn" disabled>Level 1</button>
-      <button id="btn-level2" class="menu-btn" disabled>Level 2</button>
-      <button id="btn-how-to-play" class="menu-btn">How to Play</button>
+  <!-- Nickname screen (after Click to start) -->
+  <div id="nickname-screen" class="screen nickname-screen">
+    <div class="nickname-bg" aria-hidden="true"></div>
+    <div class="nickname-overlay"></div>
+    <div class="nickname-content">
+      <h2 class="screen-title">Enter your nickname</h2>
+      <input type="text" id="nickname-input" class="nickname-input" maxlength="20" placeholder="Nickname" autocomplete="off" />
+      <p id="nickname-error" class="nickname-error hidden" aria-live="polite"></p>
+      <button id="btn-nickname-start" class="menu-btn">Start</button>
     </div>
   </div>
 
-  <!-- Choose Player Screen -->
-  <div id="choose-player-screen" class="screen">
-    <h2 class="screen-title">Choose Your Character</h2>
-    <div id="character-cards" class="character-cards"></div>
-    <button id="btn-confirm-player" class="menu-btn">Confirm</button>
+  <!-- Main Menu -->
+  <div id="main-menu" class="screen main-menu-screen">
+    <div class="main-menu-bg"></div>
+    <div class="main-menu-content">
+      <h1 class="game-title">Stay Close</h1>
+      <p class="subtitle">Don't wander off... again.</p>
+      <p id="selected-player-display" class="selected-player"></p>
+      <div class="menu-buttons">
+        <button id="btn-level1" class="menu-btn">Level 1</button>
+        <button id="btn-how-to-play" class="menu-btn">How to Play</button>
+      </div>
+    </div>
   </div>
 
   <!-- Game Canvas Container -->
@@ -51,15 +57,22 @@
       <div id="touch-controls" class="touch-controls" aria-hidden="true">
         <button type="button" id="btn-jump" class="touch-btn jump-btn" aria-label="Jump">JUMP</button>
       </div>
-      <!-- Mobile: Level 2 — bottom 33% of screen = flap -->
-      <div id="l2-tap-zone" class="l2-tap-zone hidden" aria-label="Flap (tap)"></div>
     </div>
     <div id="game-ui" class="game-ui"></div>
   </div>
 
   <!-- Game Over Screen -->
-  <div id="gameover-screen" class="screen overlay-screen">
-    <p id="gameover-l2-score" class="scorecard-score hidden" aria-live="polite"></p>
+  <div id="gameover-screen" class="screen overlay-screen gameover-screen">
+    <div class="gameover-content">
+      <p class="gameover-heading">Game Over</p>
+      <span class="gameover-icon" aria-hidden="true">💀</span>
+      <p id="gameover-message" class="end-message end-message-gameover">Volgende keer waarschijnlijk weer niet beter.</p>
+      <p id="gameover-score" class="gameover-score">Je score: 0</p>
+    </div>
+    <div class="scoreboard-box">
+      <h3 class="scoreboard-title">Scorebord <span class="scoreboard-placeholder">(demo)</span></h3>
+      <ul id="gameover-scoreboard" class="scoreboard-list" aria-live="polite"></ul>
+    </div>
     <div class="menu-buttons">
       <button id="btn-retry" class="menu-btn">Opnieuw beginnen</button>
       <button id="btn-gameover-menu" class="menu-btn">Terug naar menu</button>
@@ -67,7 +80,15 @@
   </div>
 
   <!-- Win Screen -->
-  <div id="win-screen" class="screen overlay-screen">
+  <div id="win-screen" class="screen overlay-screen win-screen">
+    <div class="win-content">
+      <p id="win-message" class="win-title">DreamTeam waardig!</p>
+      <p id="win-score" class="win-score">Je score: 0</p>
+    </div>
+    <div class="scoreboard-box">
+      <h3 class="scoreboard-title">Scorebord <span class="scoreboard-placeholder">(demo)</span></h3>
+      <ul id="win-scoreboard" class="scoreboard-list" aria-live="polite"></ul>
+    </div>
     <div class="menu-buttons">
       <button id="btn-win-retry" class="menu-btn">Opnieuw beginnen</button>
       <button id="btn-win-menu" class="menu-btn">Terug naar menu</button>
@@ -79,20 +100,13 @@
     <div class="modal-content">
       <h3>How to Play</h3>
 
-      <p><strong>Level 1 — Stay Close</strong></p>
+      <p><strong>Stay Close</strong></p>
       <ul>
         <li>You run at the same pace as Plofferson. <strong>Jump</strong> to clear obstacles!</li>
         <li><strong>Desktop:</strong> Space, Up arrow, or W to jump.</li>
         <li><strong>Mobile:</strong> Tap the JUMP button.</li>
         <li>Jump over <strong>jeeps</strong>, the <strong>tank</strong>, and the <strong>house</strong>!</li>
-        <li>Stay close to Plofferson to earn points. Survive <strong>30 seconds</strong> to win.</li>
-      </ul>
-
-      <p><strong>Level 2 — Chopper</strong></p>
-      <ul>
-        <li><strong>Tap</strong> (or Space / Up / W) to flap and gain height; gravity pulls you down.</li>
-        <li>Avoid <strong>buildings</strong> and <strong>mines</strong>. Don't hit the ground!</li>
-        <li>Your score is how many seconds you stayed alive. Survive <strong>60 seconds</strong> to win.</li>
+        <li>Stay close to Plofferson to earn points. Survive <strong>60 seconds</strong> to win.</li>
       </ul>
 
       <button id="btn-close-modal" class="menu-btn">Got it</button>

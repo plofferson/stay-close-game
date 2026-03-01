@@ -14,15 +14,11 @@ Open `index.html` in a modern browser (Chrome, Firefox, Edge).
 
 ## Features
 
-- **Main menu** — Start Game, Choose Player, How to Play
+- **Main menu** — Choose Player, Level 1, How to Play
 - **Choose Player** — Pick from several characters (saved for the session)
-- **Level 1** — Survive 60 seconds; jump over cars, house, and trenches; get stuck on an obstacle and you fall behind and die
-- **Game Over / Win** — Themed messages, Retry, Next Level (placeholder), Main Menu
+- **Stay Close** — Parachute in, then run; jump over jeeps, tank, and house; stay close to Plofferson to score; survive 30 seconds to win. Get stuck — game over.
+- **Game Over / Win** — Retry, Back to menu
 
 ## Controls
 
 - **Space / Up / W** or **JUMP button (mobile)** — Jump to clear obstacles
-
-## Level 2
-
-Planned: obstacles, enemies, and more mechanics. For now only the “Next Level” button is present as a placeholder.

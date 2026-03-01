@@ -4,25 +4,25 @@
  */
 const CONFIG = {
   /** World scroll speed (px per second) — map moves left; friend stays fixed on screen */
-  SCROLL_SPEED: 161,
+  SCROLL_SPEED: 130,
   /** Extra forward speed (px/s) so the character drifts right and can catch up — lower = harder to stay close */
   FRIEND_FORWARD_BOOST: 18,
-  /** Level 1 duration (seconds) to win */
-  LEVEL1_DURATION: 30,
+  /** Level 1 duration (seconds) to win — timer counts down from this to 0 */
+  LEVEL1_DURATION: 60,
   /** Friend fixed X on screen (pixels from left) — only vertical movement */
   FRIEND_FIXED_X: 110,
   /** Gravity (px/s²) applied when in air */
   GRAVITY: 520,
   /** Upward velocity (px/s) when jump is pressed */
-  JUMP_VELOCITY: -320,
+  JUMP_VELOCITY: -345,
   /** Right 25% of screen: Plofferson stays in this zone */
   PLOFFERSON_ZONE_RIGHT_FRACTION: 0.25,
   PLOFFERSON_WANDER_AMPLITUDE: 30,
   PLOFFERSON_WANDER_SPEED: 1.2,
   /** How far friend can be off left of screen before game over (stuck / left behind) */
   FRIEND_OFF_LEFT_MARGIN: 40,
-  /** Ground level (Y) for characters on screen — narrow portrait view */
-  GROUND_Y: 520,
+  /** Ground level (Y) for characters on screen — higher = less empty sky */
+  GROUND_Y: 400,
   /** Narrow portrait (Flappy Bird style): less horizontal view, less time to react */
   CANVAS_WIDTH: 360,
   CANVAS_HEIGHT: 640,
@@ -34,10 +34,11 @@ const CONFIG = {
   OBSTACLE_SPAWN_MAX: 220,
   /** Obstacle definitions: width (world px), height (px from ground up) */
   OBSTACLES: {
-    jeep: { width: 54, height: 28 },
+    jeep: { width: 54, height: 36 },
     tank: { width: 94, height: 40 },
     house1: { width: 58, height: 42 },
-    house2: { width: 58, height: 80 },
+    house2: { width: 58, height: 110 },
+    house3: { width: 90, height: 58 },
   },
   /** Small gap between 1-story and 2-story in a house pair */
   HOUSE_PAIR_GAP: 6,
@@ -55,29 +56,23 @@ const CONFIG = {
   SCORE_POINTS_PER_SECOND: 12,
   /** After landing: first obstacle spawns this far (world px) beyond right edge, so player has room to react */
   LANDING_GRACE_DISTANCE: 220,
-
-  /** Level 2: Chopper — Flappy-style: flap = impulse up, no input = gravity down. Score = seconds survived. */
-  LEVEL2_DURATION: 60,
-  L2_SCROLL_SPEED: 195,
-  L2_INTRO_DURATION: 3,
-  HELI_FIXED_X: 100,
-  HELI_FLAP_VELOCITY: -220,
-  HELI_GRAVITY: 480,
-  HELI_SIZE: 36,
-  L2_GRACE_DISTANCE: 120,
-  L2_SPAWN_MIN: 90,
-  L2_SPAWN_MAX: 200,
-  L2_BUILDING_WIDTH_MIN: 42,
-  L2_BUILDING_WIDTH_MAX: 88,
-  L2_BUILDING_HEIGHT_MIN: 80,
-  L2_BUILDING_HEIGHT_MAX: 420,
-  L2_BUILDING_LOW_THRESHOLD: 180,
-  L2_MINE_RADIUS: 12,
-  /** Mines in upper half of screen only (Y = 0 is top) */
-  L2_MINE_Y_MIN: 70,
-  L2_MINE_Y_MAX: 310,
-  L2_BALLOON_SIZE: 38,
+  /** Lives before game over */
+  MAX_LIVES: 3,
+  /** Seconds of invincibility after respawn */
+  INVINCIBILITY_DURATION: 2,
 };
+
+// TRENCH_CONFIG — adjust positions and size here. Keep trench positions outside 80px of early obstacle spawn (e.g. first spawn ~120 or ~580).
+/** Trenches (loopgraven): width ~1.5x player, depth ~2x player. Positions in world X. */
+const TRENCH_CONFIG = {
+  width: 60,
+  depth: 45,
+  trenches: [
+    { x: 680 },
+    { x: 1200 },
+  ],
+};
+const TRENCH_SAFETY_MARGIN = 80;
 
 /**
  * Game state enum
@@ -85,28 +80,58 @@ const CONFIG = {
  */
 const GameState = {
   MENU: 'menu',
-  CHOOSE_PLAYER: 'choosePlayer',
   PLAYING: 'playing',
   PAUSED: 'paused',
   GAMEOVER: 'gameover',
   WIN: 'win',
 };
 
+// TODO: Replace with real database API call
+/** Placeholder leaderboard scores (top 5 only). Swap data source when DB is connected. */
+const PLACEHOLDER_SCORES = [
+  { name: 'Plofferson', score: 844 },
+  { name: 'Plofferson', score: 724 },
+  { name: 'Plofferson', score: 623 },
+  { name: 'Plofferson', score: 622 },
+  { name: 'Plofferson', score: 590 },
+];
+
 /**
- * Character definitions for Choose Player screen (arcade soldiers)
+ * Render top 5 scores into a scoreboard list element. Accepts scores array so only data source needs swapping later.
+ * @param {Array<{name: string, score: number}>} scores - Up to 5 entries (only first 5 shown)
+ * @param {number} [currentScore] - If provided, the row with this score gets highlighted as current player
+ * @param {HTMLUListElement} listEl - The <ul> to fill (e.g. gameover-scoreboard or win-scoreboard)
  */
-const CHARACTERS = [
-  { id: 'jahaa', name: 'Jahaa', emoji: '🪖', color: '#4a9c5e' },
-  { id: 'johncheese', name: 'Johncheese', emoji: '🪖', color: '#e8c547' },
-  { id: 'mrhebowski', name: 'MrHebowski', emoji: '🪖', color: '#8b5a9b' },
-  { id: 'ownerd', name: 'Ownerd', emoji: '🪖', color: '#c65d3b' },
-  { id: 'scratchemm', name: 'Scratchemm', emoji: '🪖', color: '#4a7ba7' },
+function renderScoreboard(scores, currentScore, listEl) {
+  if (!listEl) return;
+  const top5 = (scores || []).slice(0, 5);
+  listEl.innerHTML = '';
+  top5.forEach((entry, index) => {
+    const li = document.createElement('li');
+    const rank = index + 1;
+    li.textContent = `${rank}. ${entry.name} — ${entry.score} pts`;
+    li.setAttribute('data-rank', rank);
+    li.className = 'scoreboard-rank scoreboard-rank-' + rank;
+    if (typeof currentScore === 'number' && entry.score === currentScore) {
+      li.classList.add('scoreboard-current');
+    }
+    listEl.appendChild(li);
+  });
+}
+
+/** Curse words (Dutch + English) — nickname must not contain these as whole words */
+const CURSE_WORDS = [
+  'fuck', 'shit', 'ass', 'bitch', 'damn', 'crap', 'dick', 'cock', 'pussy', 'cunt', 'whore', 'slut',
+  'kut', 'kanker', 'tyfus', 'tering', 'klootzak', 'lul', 'hoer', 'flikker', 'kak', 'reet', 'neuk',
+  'godver', 'godverdomme', 'verdomme', 'potverdorrie', 'sodemieter', 'mieters', 'pleuris', 'tering',
+  'mongool', 'idioot', 'debiel', 'imbeciel', 'retard', 'fag', 'faggot', 'nigger', 'nigga',
+  'fock', 'fuk', 'shyt', 'b1tch', 'd1ck', 'c0ck', 'kutje', 'kutjes',
 ];
 
 /** Current game state */
 let state = GameState.MENU;
-/** Selected character (object from CHARACTERS) or null */
-let selectedCharacter = null;
+/** Player nickname (set after nickname screen) */
+let playerNickname = '';
 /** Animation frame ID for game loop */
 let animationId = null;
 /** Last timestamp for delta time */
@@ -121,9 +146,18 @@ let friendWorldX = 0;
 /** Friend Y and vertical velocity */
 let friendY = 0;
 let friendVelY = 0;
+/** Horizontal velocity (used during trench exit jump to keep up with scroll; 0 during normal movement) */
+let friendVelX = 0;
+/** When non-null, friend is in a trench (IN_TRENCH state): { trench, leftBound, rightBound, bottomY } */
+let friendInTrench = null;
+let lives = 3;
+let isInvincible = false;
+let invincibilityTimer = 0;
+/** Toggle for flashing friend when invincible (skip draw every other frame) */
+let invincibleFlashToggle = false;
 let levelStartTime = 0;
-let keys = { jump: false, heliFlap: false };
-/** Active obstacles: { type: 'jeep'|'tank'|'house1'|'house2', worldX: number, width, height } */
+let keys = { jump: false };
+/** Active obstacles: { type: 'jeep'|'tank'|'house1'|'house2'|'house3', worldX: number, width, height } */
 let obstacles = [];
 /** Next obstacle will spawn when world passes this X */
 let nextObstacleAt = 0;
@@ -142,32 +176,12 @@ let ploffersonTargetX = 0;
 /** Current score (earned when close to Plofferson) */
 let score = 0;
 
-/** Which level is playing (1 or 2) */
-let currentLevel = 1;
-
-/** Level 2: helicopter Y, velocity, last control (up/stable/down) */
-let heliY = 0;
-let heliVelY = 0;
 /** Plofferson head image (photo with helmet); drawn when loaded */
 let ploffersonHeadImage = null;
-
-/** Level 2: explosion phase (crash/ground) before game over */
-let l2ExplosionStartTime = 0;
-/** Level 2: seconds survived when defeated (score); set when crash starts */
-let level2ScoreAtDeath = 0;
-const L2_EXPLOSION_DURATION = 0.9;
-
-/** Level 2 obstacles: { type: 'building'|'mine', worldX, width?, height?, y?, radius? } */
-let l2Obstacles = [];
-let nextL2ObstacleAt = 0;
-
-/** Level 1 completed (unlocks Level 2); persisted in localStorage */
-let level1Completed = false;
 
 /** DOM refs */
 const screens = {
   mainMenu: document.getElementById('main-menu'),
-  choosePlayer: document.getElementById('choose-player-screen'),
   game: document.getElementById('game-screen'),
   gameover: document.getElementById('gameover-screen'),
   win: document.getElementById('win-screen'),
@@ -175,9 +189,35 @@ const screens = {
 const canvas = document.getElementById('game-canvas');
 const ctx = canvas.getContext('2d');
 const selectedPlayerDisplay = document.getElementById('selected-player-display');
-const characterCardsContainer = document.getElementById('character-cards');
 const timerDisplay = document.getElementById('timer-display');
 const scoreDisplay = document.getElementById('score-display');
+
+/**
+ * Check if nickname contains any curse word (whole-word match, case-insensitive)
+ * @param {string} nickname
+ * @returns {boolean}
+ */
+function containsCurseWord(nickname) {
+  const lower = nickname.toLowerCase().trim();
+  for (const word of CURSE_WORDS) {
+    const re = new RegExp('\\b' + word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'i');
+    if (re.test(lower)) return true;
+  }
+  return false;
+}
+
+/**
+ * Validate nickname: non-empty, trimmed length 1–20, no curse words
+ * @param {string} nickname
+ * @returns {{ valid: boolean, error?: string }}
+ */
+function validateNickname(nickname) {
+  const trimmed = (nickname || '').trim();
+  if (trimmed.length === 0) return { valid: false, error: 'Please enter a nickname.' };
+  if (trimmed.length > 20) return { valid: false, error: 'Nickname must be 20 characters or less.' };
+  if (containsCurseWord(trimmed)) return { valid: false, error: 'That nickname is not allowed.' };
+  return { valid: true };
+}
 
 /**
  * Show a single screen and hide others
@@ -192,17 +232,15 @@ function showScreen(screenId) {
 }
 
 /**
- * Update main menu: Level 1 enabled when character chosen; Level 2 when L1 completed
+ * Update main menu: Level 1 enabled when nickname is set
  */
 function updateMainMenuState() {
-  const hasCharacter = selectedCharacter !== null;
+  const hasNickname = playerNickname.length > 0;
   const btnL1 = document.getElementById('btn-level1');
-  const btnL2 = document.getElementById('btn-level2');
-  if (btnL1) btnL1.disabled = !hasCharacter;
-  if (btnL2) btnL2.disabled = !hasCharacter || !level1Completed;
+  if (btnL1) btnL1.disabled = !hasNickname;
   if (selectedPlayerDisplay) {
-    selectedPlayerDisplay.textContent = hasCharacter ? `Playing as: ${selectedCharacter.name}` : 'Choose a character to start';
-    selectedPlayerDisplay.classList.toggle('empty', !hasCharacter);
+    selectedPlayerDisplay.textContent = hasNickname ? `Playing as: ${playerNickname}` : '';
+    selectedPlayerDisplay.classList.toggle('empty', !hasNickname);
   }
 }
 
@@ -221,20 +259,9 @@ function setState(newState, screenId) {
  */
 function initMainMenu() {
   document.getElementById('btn-level1').addEventListener('click', () => {
-    if (!selectedCharacter) return;
-    currentLevel = 1;
+    if (!playerNickname) return;
     setState(GameState.PLAYING, 'game-screen');
     requestAnimationFrame(() => startLevel1());
-  });
-  document.getElementById('btn-level2').addEventListener('click', () => {
-    if (!selectedCharacter || !level1Completed) return;
-    currentLevel = 2;
-    setState(GameState.PLAYING, 'game-screen');
-    requestAnimationFrame(() => startLevel2());
-  });
-  document.getElementById('btn-choose-player').addEventListener('click', () => {
-    setState(GameState.CHOOSE_PLAYER, 'choose-player-screen');
-    updateChoosePlayerSelection();
   });
   document.getElementById('btn-how-to-play').addEventListener('click', () => {
     document.getElementById('how-to-play-modal').classList.remove('hidden');
@@ -249,48 +276,30 @@ function closeHowToPlayModal() {
 }
 
 /**
- * Build and bind Choose Player screen
+ * Bind nickname screen: input + Start button; validate and go to main menu
  */
-function initChoosePlayer() {
-  characterCardsContainer.innerHTML = '';
-  CHARACTERS.forEach((char, index) => {
-    const card = document.createElement('div');
-    card.className = 'character-card';
-    card.dataset.id = char.id;
-    card.dataset.index = String(index);
-    card.innerHTML = `<span class="char-emoji">${char.emoji}</span><span class="char-name">${char.name}</span>`;
-    card.addEventListener('click', () => selectCharacterCard(index));
-    characterCardsContainer.appendChild(card);
-  });
-  document.getElementById('btn-confirm-player').addEventListener('click', confirmPlayerSelection);
-}
+function initNicknameScreen() {
+  const input = document.getElementById('nickname-input');
+  const btn = document.getElementById('btn-nickname-start');
+  const errEl = document.getElementById('nickname-error');
+  if (!input || !btn) return;
 
-/**
- * Set selected character index and update card visuals
- * @param {number} index - Index in CHARACTERS array
- */
-function selectCharacterCard(index) {
-  document.querySelectorAll('.character-card').forEach((c, i) => {
-    c.classList.toggle('selected', i === index);
-  });
-  selectedCharacter = CHARACTERS[index];
-}
+  const submit = () => {
+    const result = validateNickname(input.value);
+    if (errEl) {
+      errEl.classList.toggle('hidden', result.valid);
+      errEl.textContent = result.error || '';
+    }
+    if (result.valid) {
+      playerNickname = input.value.trim();
+      showScreen('main-menu');
+    }
+  };
 
-/**
- * Sync character card selected state with selectedCharacter
- */
-function updateChoosePlayerSelection() {
-  const index = selectedCharacter ? CHARACTERS.findIndex((c) => c.id === selectedCharacter.id) : -1;
-  document.querySelectorAll('.character-card').forEach((c, i) => {
-    c.classList.toggle('selected', i === index);
+  btn.addEventListener('click', submit);
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') submit();
   });
-}
-
-/**
- * Confirm player choice and return to main menu
- */
-function confirmPlayerSelection() {
-  setState(GameState.MENU, 'main-menu');
 }
 
 /**
@@ -316,8 +325,34 @@ function getFriendWorldX() {
   return friendWorldX;
 }
 
+/** Return true if world X range [xLeft, xRight] overlaps any trench (with TRENCH_SAFETY_MARGIN each side). */
+function obstacleOverlapsTrench(xLeft, xRight) {
+  for (const t of TRENCH_CONFIG.trenches) {
+    const tw = t.width ?? TRENCH_CONFIG.width;
+    const zoneLeft = t.x - TRENCH_SAFETY_MARGIN;
+    const zoneRight = t.x + tw + TRENCH_SAFETY_MARGIN;
+    if (xRight > zoneLeft && xLeft < zoneRight) return true;
+  }
+  return false;
+}
+
+/** Shift nextObstacleAt forward until it clears all trenches (with safety margin). */
+function shiftSpawnPastTrenches(obstacleWidth) {
+  while (obstacleOverlapsTrench(nextObstacleAt, nextObstacleAt + obstacleWidth)) {
+    for (const t of TRENCH_CONFIG.trenches) {
+      const tw = t.width ?? TRENCH_CONFIG.width;
+      const zoneRight = t.x + tw + TRENCH_SAFETY_MARGIN;
+      if (nextObstacleAt < zoneRight && nextObstacleAt + obstacleWidth > t.x - TRENCH_SAFETY_MARGIN) {
+        nextObstacleAt = zoneRight;
+        break;
+      }
+    }
+  }
+}
+
 /**
  * Spawn one obstacle or a house pair (1-story then 2-story). Jeeps and tanks single; houses always 1 then 2.
+ * Spawn position is shifted forward if it would overlap a trench (safety margin 80px each side).
  */
 function spawnObstacle() {
   const roll = Math.random();
@@ -325,16 +360,18 @@ function spawnObstacle() {
     const h1 = CONFIG.OBSTACLES.house1;
     const h2 = CONFIG.OBSTACLES.house2;
     const gap = CONFIG.HOUSE_PAIR_GAP;
+    const pairWidth = h1.width + gap + h2.width;
+    shiftSpawnPastTrenches(pairWidth);
     obstacles.push({ type: 'house1', worldX: nextObstacleAt, width: h1.width, height: h1.height });
     obstacles.push({ type: 'house2', worldX: nextObstacleAt + h1.width + gap, width: h2.width, height: h2.height });
-    const pairWidth = h1.width + gap + h2.width;
     const spacing = CONFIG.OBSTACLE_SPAWN_MIN + Math.random() * (CONFIG.OBSTACLE_SPAWN_MAX - CONFIG.OBSTACLE_SPAWN_MIN);
     nextObstacleAt += pairWidth + spacing;
     return;
   }
-  const types = ['jeep', 'tank'];
+  const types = ['jeep', 'tank', 'house3'];
   const type = types[Math.floor(Math.random() * types.length)];
   const def = CONFIG.OBSTACLES[type];
+  shiftSpawnPastTrenches(def.width);
   obstacles.push({
     type,
     worldX: nextObstacleAt,
@@ -352,9 +389,20 @@ function pruneObstacles() {
   obstacles = obstacles.filter((o) => o.worldX + o.width > worldScrollX - 50);
 }
 
-/** Solid ground everywhere (no trenches). */
-function isGroundAt() {
-  return true;
+/** Return the trench object if friend's horizontal span [friendWX, friendWX+CHAR_SIZE] overlaps it, else null. */
+function getTrenchUnderFriend(friendWX) {
+  const left = friendWX;
+  const right = friendWX + CONFIG.CHAR_SIZE;
+  for (const t of TRENCH_CONFIG.trenches) {
+    const tw = t.width ?? TRENCH_CONFIG.width;
+    if (right > t.x && left < t.x + tw) return { ...t, width: tw };
+  }
+  return null;
+}
+
+/** True if there is solid ground under the friend (no trench overlap). */
+function isGroundAt(friendWX) {
+  return getTrenchUnderFriend(friendWX) === null;
 }
 
 /**
@@ -372,6 +420,8 @@ function resizeCanvas() {
 }
 
 function startLevel1() {
+  cancelAnimationFrame(animationId);
+  animationId = null;
   resizeCanvas();
   worldScrollX = 0;
   friendWorldX = CONFIG.FRIEND_FIXED_X;
@@ -382,8 +432,14 @@ function startLevel1() {
   ploffersonTargetX = zone.center;
   friendY = CONFIG.GROUND_Y - CONFIG.CHAR_SIZE;
   friendVelY = 0;
+  friendVelX = 0;
+  friendInTrench = null;
+  lives = CONFIG.MAX_LIVES;
+  isInvincible = false;
+  invincibilityTimer = 0;
+  invincibleFlashToggle = false;
   levelStartTime = performance.now() / 1000;
-  timerDisplay.textContent = '0:00';
+  timerDisplay.textContent = '0:60';
   if (timerDisplay) timerDisplay.classList.remove('hidden');
   lastTime = performance.now();
 
@@ -400,38 +456,6 @@ function startLevel1() {
   if (isTouchDevice()) {
     const tc = document.getElementById('touch-controls');
     if (tc) tc.classList.add('visible');
-    const tapZone = document.getElementById('l2-tap-zone');
-    if (tapZone) tapZone.classList.add('hidden');
-  }
-  requestAnimationFrame(gameLoop);
-}
-
-function startLevel2() {
-  resizeCanvas();
-  currentLevel = 2;
-  worldScrollX = 0;
-  heliY = CONFIG.CANVAS_HEIGHT / 2 - CONFIG.HELI_SIZE / 2;
-  heliVelY = 0;
-  keys.heliFlap = false;
-  l2Obstacles = [];
-  nextL2ObstacleAt = CONFIG.CANVAS_WIDTH + CONFIG.L2_GRACE_DISTANCE;
-  levelStartTime = performance.now() / 1000;
-  l2ExplosionStartTime = 0;
-  level2ScoreAtDeath = 0;
-  timerDisplay.textContent = '0:00';
-  if (timerDisplay) timerDisplay.classList.remove('hidden');
-  lastTime = performance.now();
-  if (scoreDisplay) scoreDisplay.classList.add('hidden');
-  const tauntEl = document.getElementById('taunt-message');
-  if (tauntEl) tauntEl.classList.add('hidden');
-
-  while (nextL2ObstacleAt < CONFIG.CANVAS_WIDTH + 200) spawnL2Obstacle();
-
-  if (isTouchDevice()) {
-    const tc = document.getElementById('touch-controls');
-    if (tc) tc.classList.remove('visible');
-    const tapZone = document.getElementById('l2-tap-zone');
-    if (tapZone) { tapZone.classList.remove('hidden'); tapZone.classList.add('visible'); }
   }
   requestAnimationFrame(gameLoop);
 }
@@ -497,6 +521,7 @@ function getPlatformTopUnderFriend() {
     const oLeft = o.worldX - 2;
     const oRight = o.worldX + o.width + 2;
     if (friendRight <= oLeft || friendLeft >= oRight) continue;
+    if (friendRight <= o.worldX) continue;
     const obstacleTop = groundYLine - o.height;
     if (friendBottom >= obstacleTop - 3 && friendBottom <= obstacleTop + 28) {
       if (bestTop === null || obstacleTop < bestTop) bestTop = obstacleTop;
@@ -512,55 +537,71 @@ function isFriendOffLeft() {
 }
 
 /**
- * Game over: show only retry and menu buttons; for L2 show score (seconds survived)
+ * Decrease lives by 1. If 0, trigger game over. Otherwise restart level from the beginning (no parachute),
+ * timer resets, and set invincibility. Game over is only triggered from here.
+ */
+function loseLife() {
+  lives -= 1;
+  if (lives <= 0) {
+    triggerGameOver();
+    return;
+  }
+  worldScrollX = 0;
+  obstacles = [];
+  nextObstacleAt = CONFIG.CANVAS_WIDTH + CONFIG.LANDING_GRACE_DISTANCE;
+  const zone = getPloffersonZone();
+  ploffersonScreenX = zone.center;
+  ploffersonTargetX = zone.center;
+  friendWorldX = CONFIG.FRIEND_FIXED_X;
+  friendY = CONFIG.GROUND_Y - CONFIG.CHAR_SIZE;
+  friendVelY = 0;
+  friendVelX = 0;
+  friendInTrench = null;
+  levelPhase = 'running';
+  levelStartTime = performance.now() / 1000;
+  lastTime = performance.now();
+  isInvincible = true;
+  invincibilityTimer = CONFIG.INVINCIBILITY_DURATION;
+}
+
+/**
+ * Game over: show retry and menu buttons, display score, render scoreboard
  */
 function triggerGameOver() {
   cancelAnimationFrame(animationId);
   const tc = document.getElementById('touch-controls');
   if (tc) tc.classList.remove('visible');
-  const tapZone = document.getElementById('l2-tap-zone');
-  if (tapZone) tapZone.classList.add('hidden');
-  const l2ScoreEl = document.getElementById('gameover-l2-score');
-  if (l2ScoreEl) {
-    if (currentLevel === 2) {
-      l2ScoreEl.textContent = `Score: ${level2ScoreAtDeath}s`;
-      l2ScoreEl.classList.remove('hidden');
-    } else {
-      l2ScoreEl.classList.add('hidden');
-    }
-  }
+  const finalScore = Math.floor(score);
+  const scoreEl = document.getElementById('gameover-score');
+  if (scoreEl) scoreEl.textContent = 'Je score: ' + finalScore;
+  const listEl = document.getElementById('gameover-scoreboard');
+  renderScoreboard(PLACEHOLDER_SCORES, finalScore, listEl);
   setState(GameState.GAMEOVER, 'gameover-screen');
 }
 
 /**
- * Win: show only retry and menu buttons
+ * Win: show retry and menu buttons, display score, render scoreboard
+ * @param {number} [finalScore] - Score at moment of win; defaults to Math.floor(score) if omitted
  */
-function triggerWin() {
+function triggerWin(finalScore) {
   cancelAnimationFrame(animationId);
   const tc = document.getElementById('touch-controls');
   if (tc) tc.classList.remove('visible');
-  const tapZone = document.getElementById('l2-tap-zone');
-  if (tapZone) tapZone.classList.add('hidden');
-  if (currentLevel === 1) {
-    level1Completed = true;
-    try { localStorage.setItem('stayClose_level1Completed', '1'); } catch (_) {}
-  }
+  const scoreToShow = typeof finalScore === 'number' ? finalScore : Math.floor(score);
   setState(GameState.WIN, 'win-screen');
+  const scoreEl = document.getElementById('win-score');
+  if (scoreEl) scoreEl.textContent = 'Je score: ' + scoreToShow;
+  const listEl = document.getElementById('win-scoreboard');
+  renderScoreboard(PLACEHOLDER_SCORES, scoreToShow, listEl);
 }
 
 /**
- * Keyboard input: Level 1 jump; Level 2 up/stable/down (last key wins)
+ * Keyboard input: jump (Space, Up, W)
  */
 function initInput() {
   const jumpCodes = ['Space', 'ArrowUp', 'KeyW'];
-  const flapCodes = ['Space', 'ArrowUp', 'KeyW'];
   document.addEventListener('keydown', (e) => {
-    if (currentLevel === 2) {
-      if (flapCodes.includes(e.code) && !e.repeat) {
-        keys.heliFlap = true;
-        e.preventDefault();
-      }
-    } else if (jumpCodes.includes(e.code)) {
+    if (jumpCodes.includes(e.code)) {
       keys.jump = true;
       e.preventDefault();
     }
@@ -591,17 +632,6 @@ function initTouchControls() {
   jumpBtn.addEventListener('pointerleave', () => setJump(false));
   jumpBtn.addEventListener('pointercancel', () => setJump(false));
   jumpBtn.addEventListener('touchstart', (e) => e.preventDefault(), { passive: false });
-}
-
-/**
- * Level 2 touch: bottom 33% of screen = flap (one tap = one impulse)
- */
-function initTouchControlsL2() {
-  const tapZone = document.getElementById('l2-tap-zone');
-  if (!tapZone) return;
-  const flap = () => { keys.heliFlap = true; };
-  tapZone.addEventListener('pointerdown', (e) => { e.preventDefault(); flap(); }, { passive: false });
-  tapZone.addEventListener('touchstart', (e) => { e.preventDefault(); flap(); }, { passive: false });
 }
 
 /**
@@ -665,15 +695,12 @@ function drawParachuteIntro() {
   if (!parachuteDropped) {
     drawPlane(planeX, planeY);
   } else {
-    // #region agent log
-    fetch('http://127.0.0.1:7243/ingest/2a1a30c2-e1ba-46c1-a5c2-9acdecdfcce3',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'dcaaa3'},body:JSON.stringify({sessionId:'dcaaa3',location:'game.js:drawParachuteIntro',message:'Parachute draw order',data:{phase:levelPhase,friendY:friendParachuteY,ploffY:ploffersonParachuteY,animTime},timestamp:Date.now(),hypothesisId:'H2'})}).catch(()=>{});
-    // #endregion
     drawParachuteCanopyOnly(friendParachuteX, friendParachuteY);
     drawParachuteCanopyOnly(ploffersonParachuteX, ploffersonParachuteY);
     drawParachuteRopesOnly(friendParachuteX, friendParachuteY);
     drawParachuteRopesOnly(ploffersonParachuteX, ploffersonParachuteY);
-    const color = selectedCharacter ? selectedCharacter.color : '#8b7355';
-    const label = selectedCharacter ? selectedCharacter.name.charAt(0) : '?';
+    const color = '#4a9c5e';
+    const label = playerNickname ? playerNickname.trim().charAt(0).toUpperCase() : '?';
     drawSoldier(ctx, friendParachuteX, friendParachuteY, color, label, animTime, false);
     drawSoldier(ctx, ploffersonParachuteX, ploffersonParachuteY, '#2d5016', 'P', animTime, true);
   }
@@ -793,122 +820,11 @@ function drawParachuteRopesOnly(characterX, characterY) {
   }
 }
 
-function drawParachuteCanopy(characterX, characterY) {
-  drawParachuteCanopyOnly(characterX, characterY);
-  drawParachuteRopesOnly(characterX, characterY);
-}
-
-/** Spawn one Level 2 obstacle: always a building; often a mine above low buildings (upper half, random height) */
-function spawnL2Obstacle() {
-  const gap = CONFIG.L2_SPAWN_MIN + Math.random() * (CONFIG.L2_SPAWN_MAX - CONFIG.L2_SPAWN_MIN);
-  const width = CONFIG.L2_BUILDING_WIDTH_MIN + Math.random() * (CONFIG.L2_BUILDING_WIDTH_MAX - CONFIG.L2_BUILDING_WIDTH_MIN);
-  const height = CONFIG.L2_BUILDING_HEIGHT_MIN + Math.random() * (CONFIG.L2_BUILDING_HEIGHT_MAX - CONFIG.L2_BUILDING_HEIGHT_MIN);
-  const worldX = nextL2ObstacleAt;
-  l2Obstacles.push({
-    type: 'building',
-    worldX,
-    width,
-    height,
-  });
-  nextL2ObstacleAt += gap + width;
-  const isLow = height < CONFIG.L2_BUILDING_LOW_THRESHOLD;
-  if (isLow && Math.random() < 0.82) {
-    const mineY = CONFIG.L2_MINE_Y_MIN + Math.random() * (CONFIG.L2_MINE_Y_MAX - CONFIG.L2_MINE_Y_MIN);
-    l2Obstacles.push({
-      type: 'mine',
-      worldX: worldX + width / 2 - CONFIG.L2_MINE_RADIUS,
-      y: mineY,
-      radius: CONFIG.L2_MINE_RADIUS,
-    });
-  }
-}
-
-function updateLevel2(dt) {
-  const elapsed = getLevelElapsed();
-  const inIntro = elapsed < CONFIG.L2_INTRO_DURATION;
-
-  if (inIntro) {
-    timerDisplay.textContent = '0:00';
-    return;
-  }
-
-  worldScrollX += CONFIG.L2_SCROLL_SPEED * dt;
-
-  if (l2ExplosionStartTime > 0) {
-    if ((performance.now() / 1000) - l2ExplosionStartTime >= L2_EXPLOSION_DURATION) {
-      triggerGameOver();
-    }
-    return;
-  }
-
-  if (keys.heliFlap) {
-    heliVelY = CONFIG.HELI_FLAP_VELOCITY;
-    keys.heliFlap = false;
-  }
-  heliVelY += CONFIG.HELI_GRAVITY * dt;
-  heliVelY = Math.max(-320, Math.min(320, heliVelY));
-  heliY += heliVelY * dt;
-  heliY = Math.max(0, Math.min(CONFIG.CANVAS_HEIGHT - CONFIG.HELI_SIZE, heliY));
-
-  if (heliY + CONFIG.HELI_SIZE > CONFIG.GROUND_Y) {
-    level2ScoreAtDeath = Math.floor(elapsed);
-    l2ExplosionStartTime = performance.now() / 1000;
-    return;
-  }
-
-  while (nextL2ObstacleAt < worldScrollX + CONFIG.CANVAS_WIDTH + 150) spawnL2Obstacle();
-  l2Obstacles = l2Obstacles.filter((o) => {
-    if (o.type === 'building') return o.worldX + o.width > worldScrollX - 50;
-    return o.worldX + o.radius * 2 > worldScrollX - 50;
-  });
-
-  const heliLeft = CONFIG.HELI_FIXED_X;
-  const heliRight = CONFIG.HELI_FIXED_X + CONFIG.HELI_SIZE;
-  const heliTop = heliY;
-  const heliBottom = heliY + CONFIG.HELI_SIZE;
-  const heliCx = CONFIG.HELI_FIXED_X + CONFIG.HELI_SIZE / 2;
-  const heliCy = heliY + CONFIG.HELI_SIZE / 2;
-
-  for (const o of l2Obstacles) {
-    if (o.type === 'building') {
-      const screenX = o.worldX - worldScrollX;
-      if (screenX + o.width < heliLeft || screenX > heliRight) continue;
-      const top = CONFIG.GROUND_Y - o.height;
-      const bottom = CONFIG.GROUND_Y;
-      if (heliRight > screenX && heliLeft < screenX + o.width && heliBottom > top && heliTop < bottom) {
-        level2ScoreAtDeath = Math.floor(elapsed);
-        l2ExplosionStartTime = performance.now() / 1000;
-        return;
-      }
-    } else {
-      const screenX = o.worldX - worldScrollX;
-      const dx = heliCx - (screenX + o.radius);
-      const dy = heliCy - o.y;
-      const dist = Math.sqrt(dx * dx + dy * dy);
-      if (dist < o.radius + CONFIG.HELI_SIZE / 2) {
-        level2ScoreAtDeath = Math.floor(elapsed);
-        l2ExplosionStartTime = performance.now() / 1000;
-        return;
-      }
-    }
-  }
-
-  const mins = Math.floor(elapsed / 60);
-  const secs = Math.floor(elapsed % 60);
-  timerDisplay.textContent = `${mins}:${secs.toString().padStart(2, '0')}`;
-
-  if (elapsed >= CONFIG.LEVEL2_DURATION) triggerWin();
-}
-
 /**
- * Update game logic for Level 1 (auto-runner: jump over obstacles; stuck = fall behind)
+ * Update game logic (auto-runner: jump over obstacles; stuck = fall behind)
  * @param {number} dt - Delta time in seconds
  */
 function update(dt) {
-  if (currentLevel === 2) {
-    updateLevel2(dt);
-    return;
-  }
   if (levelPhase === 'intro_tooltip') {
     if (getLevelElapsed() >= CONFIG.L1_INTRO_DURATION) {
       levelPhase = 'parachute';
@@ -930,52 +846,118 @@ function update(dt) {
   while (nextObstacleAt < worldScrollX + CONFIG.CANVAS_WIDTH + 100) spawnObstacle();
   pruneObstacles();
 
+  if (isInvincible) {
+    invincibilityTimer -= dt;
+    if (invincibilityTimer <= 0) {
+      isInvincible = false;
+      invincibilityTimer = 0;
+    }
+  }
+
   const groundY = CONFIG.GROUND_Y - CONFIG.CHAR_SIZE;
   const friendWX = getFriendWorldX();
-  const onSolidGround = isGroundAt(friendWX);
 
-  const platformTopBefore = getPlatformTopUnderFriend();
-  const onPlatformBefore = platformTopBefore !== null;
-
-  if (onSolidGround && !onPlatformBefore) {
-    friendY = Math.min(friendY, groundY);
-    if (friendY >= groundY - 1) friendVelY = 0;
+  // —— IN_TRENCH state: gravity to bottom, clamp X to trench, jump to escape ——
+  if (friendInTrench !== null) {
+    if (keys.jump) {
+      friendVelY = CONFIG.JUMP_VELOCITY;
+      friendVelX = CONFIG.SCROLL_SPEED + CONFIG.FRIEND_FORWARD_BOOST * 0.35;
+      friendInTrench = null;
+    } else {
+      const bottomY = friendInTrench.bottomY - CONFIG.CHAR_SIZE;
+      friendVelY += CONFIG.GRAVITY * dt;
+      friendY += friendVelY * dt;
+      if (friendY + CONFIG.CHAR_SIZE >= friendInTrench.bottomY) {
+        friendY = bottomY;
+        friendVelY = 0;
+      }
+      friendWorldX = Math.max(friendInTrench.leftBound, Math.min(friendInTrench.rightBound, friendWorldX));
+    }
+  } else {
+    // Check if standing over a trench opening (feet at/below ground) → fall in
+    const trench = getTrenchUnderFriend(friendWX);
+    if (trench && friendY + CONFIG.CHAR_SIZE >= CONFIG.GROUND_Y - 2) {
+      friendInTrench = {
+        trench,
+        leftBound: trench.x + 4,
+        rightBound: trench.x + trench.width - CONFIG.CHAR_SIZE - 4,
+        bottomY: CONFIG.GROUND_Y + TRENCH_CONFIG.depth,
+      };
+    }
   }
 
-  const canJumpFrom = onSolidGround || onPlatformBefore;
-  if (keys.jump && canJumpFrom && friendVelY >= 0) {
-    const standY = onPlatformBefore ? platformTopBefore - CONFIG.CHAR_SIZE : groundY;
-    if (friendY >= standY - 6) friendVelY = CONFIG.JUMP_VELOCITY;
-  }
-  friendVelY += CONFIG.GRAVITY * dt;
-  friendY += friendVelY * dt;
+  // —— Normal ground/platform/jump and horizontal advance (only when not in trench) ——
+  if (friendInTrench === null) {
+    const onSolidGround = isGroundAt(friendWX);
+    const platformTopBefore = getPlatformTopUnderFriend();
+    const onPlatformBefore = platformTopBefore !== null;
 
-  if (onSolidGround && !onPlatformBefore) {
-    friendY = Math.min(friendY, groundY);
-    if (friendY >= groundY - 1) friendVelY = 0;
-  }
-  const platformTop = getPlatformTopUnderFriend();
-  if (platformTop !== null && friendVelY >= 0 && friendY + CONFIG.CHAR_SIZE >= platformTop - 4) {
-    friendY = platformTop - CONFIG.CHAR_SIZE;
-    friendVelY = 0;
+    if (onSolidGround && !onPlatformBefore) {
+      friendY = Math.min(friendY, groundY);
+      if (friendY >= groundY - 1) {
+        friendVelY = 0;
+        friendVelX = 0;
+      }
+    }
+
+    const canJumpFrom = onSolidGround || onPlatformBefore;
+    if (keys.jump && canJumpFrom && friendVelY >= 0) {
+      const standY = onPlatformBefore ? platformTopBefore - CONFIG.CHAR_SIZE : groundY;
+      if (friendY >= standY - 6) {
+        friendVelY = CONFIG.JUMP_VELOCITY;
+        friendVelX = CONFIG.SCROLL_SPEED + CONFIG.FRIEND_FORWARD_BOOST * 0.2;
+      }
+    }
+    friendVelY += CONFIG.GRAVITY * dt;
+    friendY += friendVelY * dt;
+
+    if (onSolidGround && !onPlatformBefore) {
+      friendY = Math.min(friendY, groundY);
+      if (friendY >= groundY - 1) {
+        friendVelY = 0;
+        friendVelX = 0;
+      }
+    }
+    const platformTop = getPlatformTopUnderFriend();
+    if (platformTop !== null && friendVelY > 0 && friendY + CONFIG.CHAR_SIZE >= platformTop - 4) {
+      friendY = platformTop - CONFIG.CHAR_SIZE;
+      friendVelY = 0;
+      friendVelX = 0;
+    }
+
+    if (friendVelX !== 0) {
+      friendWorldX += friendVelX * dt;
+    } else if (!isFriendStuckOnObstacle()) {
+      friendWorldX += (CONFIG.SCROLL_SPEED + CONFIG.FRIEND_FORWARD_BOOST) * dt;
+    }
+    const groundYLine = CONFIG.GROUND_Y;
+    for (const o of obstacles) {
+      const friendRight = friendWorldX + CONFIG.CHAR_SIZE;
+      const friendLeft = friendWorldX;
+      const friendBottom = friendY + CONFIG.CHAR_SIZE;
+      const obstacleTop = groundYLine - o.height;
+      if (friendRight > o.worldX && friendLeft < o.worldX && friendBottom > obstacleTop) {
+        friendWorldX = o.worldX - CONFIG.CHAR_SIZE;
+        friendVelX = 0;
+      }
+    }
   }
 
-  if (!isFriendStuckOnObstacle()) {
-    friendWorldX += (CONFIG.SCROLL_SPEED + CONFIG.FRIEND_FORWARD_BOOST) * dt;
-  }
-
-  if (isFriendOffLeft()) {
-    triggerGameOver();
-    return;
-  }
-  if (isFriendOffScreen()) {
-    triggerGameOver();
-    return;
+  if (!isInvincible) {
+    if (isFriendOffLeft()) {
+      loseLife();
+      return;
+    }
+    if (isFriendOffScreen()) {
+      loseLife();
+      return;
+    }
   }
 
   const elapsed = getLevelElapsed();
-  const mins = Math.floor(elapsed / 60);
-  const secs = Math.floor(elapsed % 60);
+  const remaining = Math.max(0, CONFIG.LEVEL1_DURATION - elapsed);
+  const mins = Math.floor(remaining / 60);
+  const secs = Math.floor(remaining % 60);
   timerDisplay.textContent = `${mins}:${secs.toString().padStart(2, '0')}`;
 
   const friendScreenX = friendWorldX - worldScrollX;
@@ -992,7 +974,7 @@ function update(dt) {
   }
 
   if (elapsed >= CONFIG.LEVEL1_DURATION) {
-    triggerWin();
+    triggerWin(Math.floor(score));
   }
 }
 
@@ -1045,7 +1027,7 @@ function drawParallaxBackground() {
 }
 
 /**
- * Scrolling ground: simple two-tone, thin top edge — clean
+ * Scrolling ground: simple two-tone, thin top edge — clean. Trenches drawn on top by drawTrenches().
  */
 function drawScrollingGround() {
   const groundY = CONFIG.GROUND_Y;
@@ -1063,6 +1045,46 @@ function drawScrollingGround() {
 }
 
 /**
+ * Draw trenches (loopgraven): gap with visible depth, darker brown walls/bottom, broken top edge.
+ */
+function drawTrenches() {
+  const groundY = CONFIG.GROUND_Y;
+  const depth = TRENCH_CONFIG.depth;
+  const darkDirt = '#5c4a3a';
+  const darkerDirt = '#4a3d30';
+  const edgeDark = '#6b5344';
+
+  for (const t of TRENCH_CONFIG.trenches) {
+    const w = t.width ?? TRENCH_CONFIG.width;
+    const screenX = t.x - worldScrollX;
+    if (screenX + w < 0 || screenX > CONFIG.CANVAS_WIDTH) continue;
+
+    const bottomY = groundY + depth;
+    ctx.fillStyle = darkDirt;
+    ctx.fillRect(screenX, groundY, w, depth);
+    ctx.fillStyle = darkerDirt;
+    ctx.fillRect(screenX + 2, groundY + 4, w - 4, depth - 4);
+    ctx.fillStyle = edgeDark;
+    ctx.fillRect(screenX, bottomY - 6, w, 6);
+
+    // Broken / jagged top edge (deterministic from trench x so it doesn't flicker)
+    ctx.strokeStyle = '#3d3025';
+    ctx.lineWidth = 1.5;
+    const seed = t.x * 0.1;
+    ctx.beginPath();
+    ctx.moveTo(screenX, groundY);
+    for (let i = 1; i <= 8; i++) {
+      const t_ = i / 8;
+      const jx = screenX + w * t_ + (Math.sin(seed + i) * 2);
+      const jy = groundY + (Math.sin(seed + i * 1.3) * 2);
+      ctx.lineTo(jx, jy);
+    }
+    ctx.lineTo(screenX + w, groundY);
+    ctx.stroke();
+  }
+}
+
+/**
  * Draw obstacles: jeeps, tanks, 1-story and 2-story houses (flat roof)
  */
 function drawObstacles() {
@@ -1075,76 +1097,139 @@ function drawObstacles() {
       drawJeep(screenX, groundY, o.width, o.height);
     } else if (o.type === 'tank') {
       drawTank(screenX, groundY, o.width, o.height);
-    } else if (o.type === 'house1' || o.type === 'house2') {
+    } else if (o.type === 'house1' || o.type === 'house2' || o.type === 'house3') {
       drawHouse(screenX, groundY, o.width, o.height, o.type === 'house2');
     }
   }
 }
 
 function drawJeep(screenX, groundY, w, h) {
-  const top = groundY - h;
-  ctx.strokeStyle = '#1a1a1a';
+  // Referentie: zijaanzicht SUV/Jeep – wielen, fenders over wielen, vlakke daklijn,
+  // motorkap, vier ramen (voorruit schuin + 3 rechthoekig), bumpers, reservespaan achter
   ctx.lineWidth = 1.5;
-  // Olive / military green body
-  ctx.fillStyle = '#4a5d3a';
-  ctx.fillRect(screenX, top + h * 0.22, w, h * 0.78);
-  ctx.strokeRect(screenX, top + h * 0.22, w, h * 0.78);
-  // Flat front (grille)
-  ctx.fillStyle = '#3d4d2e';
-  ctx.fillRect(screenX, top + h * 0.2, w * 0.22, h * 0.82);
-  ctx.strokeRect(screenX, top + h * 0.2, w * 0.22, h * 0.82);
-  // Grille slots (vertical lines)
-  for (let i = 0; i < 4; i++) {
-    const gx = screenX + 4 + (i / 3) * (w * 0.14);
-    ctx.strokeStyle = '#2a3520';
-    ctx.lineWidth = 1;
+  ctx.strokeStyle = '#1a1a1a';
+  const olive = '#4a5d3a';
+  const oliveDark = '#3d4d2e';
+  const oliveRim = '#556b45';
+
+  const wheelR = Math.min(8, h * 0.4);
+  const wheelY = groundY - wheelR;
+  const wheelFrontX = screenX + w * 0.28;
+  const wheelRearX = screenX + w * 0.72;
+  const bodyBottom = wheelY - wheelR;
+  const bodyH = h - wheelR * 2 - 2;
+  const bodyTop = bodyBottom - bodyH;
+  const bodyLeft = screenX + 2;
+  const bodyW = w - 4;
+
+  // —— 1) Twee wielen (grond), met naaf ——
+  [wheelFrontX, wheelRearX].forEach((wx) => {
+    ctx.fillStyle = '#1a1a1a';
+    ctx.strokeStyle = '#333';
     ctx.beginPath();
-    ctx.moveTo(gx, top + h * 0.35);
-    ctx.lineTo(gx, groundY - 4);
+    ctx.arc(wx, wheelY, wheelR, 0, Math.PI * 2);
+    ctx.fill();
     ctx.stroke();
-  }
-  ctx.strokeStyle = '#1a1a1a';
-  ctx.lineWidth = 1.5;
-  // Round headlights
-  ctx.fillStyle = '#f1c40f';
+    ctx.fillStyle = oliveRim;
+    ctx.beginPath();
+    ctx.arc(wx, wheelY, wheelR * 0.38, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = oliveDark;
+    ctx.stroke();
+  });
+
+  // —— 2) Fenders: bogen over de bovenhelft van elk wiel ——
+  const fenderR = wheelR + 1;
+  [wheelFrontX, wheelRearX].forEach((wx) => {
+    ctx.fillStyle = olive;
+    ctx.beginPath();
+    ctx.arc(wx, wheelY, fenderR, Math.PI, 0, false);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = oliveDark;
+    ctx.stroke();
+  });
+
+  // —— 3) Carrosserie: vlakke daklijn (één rechthoek) ——
+  ctx.fillStyle = olive;
+  ctx.fillRect(bodyLeft, bodyTop, bodyW, bodyH);
+  ctx.strokeStyle = oliveDark;
+  ctx.strokeRect(bodyLeft, bodyTop, bodyW, bodyH);
+
+  // —— 4) Motorkap (voor, iets lager dan dak) ——
+  const hoodW = bodyW * 0.26;
+  const hoodH = bodyH * 0.55;
+  const hoodTop = bodyBottom - hoodH;
+  ctx.fillStyle = olive;
+  ctx.fillRect(bodyLeft, hoodTop, hoodW, hoodH);
+  ctx.strokeRect(bodyLeft, hoodTop, hoodW, hoodH);
+
+  // —— 5) Bumper voor (onder motorkap) ——
+  ctx.fillStyle = oliveDark;
+  ctx.fillRect(bodyLeft, bodyBottom, 8, 3);
+  ctx.strokeRect(bodyLeft, bodyBottom, 8, 3);
+
+  // —— 6) DERDE LAAG: cabine bovenop de carrosserie (dak groter + voorruit die omhoog loopt) ——
+  const cabinLeft = bodyLeft + hoodW - 2;
+  const cabinW = bodyW - hoodW - 10;
+  const cabinH = Math.max(14, bodyH * 0.7);   // dak groter: hogere cabine
+  const cabinRoofTop = bodyTop - cabinH;       // dak van de cabine (boven bodyTop)
+  const glassFill = 'rgba(90,110,130,0.8)';
+  ctx.strokeStyle = oliveDark;
+
+  // 6a) Cabinedak – rechthoek boven de body (duidelijke derde laag)
+  ctx.fillStyle = olive;
+  ctx.fillRect(cabinLeft, cabinRoofTop, cabinW, cabinH);
+  ctx.strokeRect(cabinLeft, cabinRoofTop, cabinW, cabinH);
+
+  // 6b) Voorruit – loopt van body omhoog naar cabinedak (schuin vlak)
+  ctx.fillStyle = glassFill;
   ctx.beginPath();
-  ctx.arc(screenX + w * 0.06, top + h * 0.45, 3, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.arc(screenX + w * 0.06, top + h * 0.7, 3, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.stroke();
-  // Cabin: open top, windshield frame
-  ctx.strokeStyle = '#2a3520';
-  ctx.fillStyle = 'rgba(60,80,50,0.4)';
-  ctx.fillRect(screenX + w * 0.24, top + h * 0.25, w * 0.52, h * 0.5);
-  ctx.strokeRect(screenX + w * 0.24, top + h * 0.25, w * 0.52, h * 0.5);
-  ctx.beginPath();
-  ctx.moveTo(screenX + w * 0.24, top + h * 0.5);
-  ctx.lineTo(screenX + w * 0.38, top + h * 0.28);
-  ctx.lineTo(screenX + w * 0.76, top + h * 0.28);
-  ctx.lineTo(screenX + w * 0.76, top + h * 0.5);
-  ctx.stroke();
-  // Star on hood
-  ctx.fillStyle = '#8b7355';
-  ctx.beginPath();
-  ctx.moveTo(screenX + w * 0.5, top + h * 0.6);
-  ctx.lineTo(screenX + w * 0.52, top + h * 0.68);
-  ctx.lineTo(screenX + w * 0.48, top + h * 0.68);
+  ctx.moveTo(cabinLeft, bodyTop);
+  ctx.lineTo(cabinLeft, cabinRoofTop);
+  ctx.lineTo(cabinLeft + cabinW * 0.28, cabinRoofTop);
+  ctx.lineTo(cabinLeft + cabinW * 0.28 + 2, bodyTop);
   ctx.closePath();
   ctx.fill();
   ctx.stroke();
-  // Big wheels (4 visible as circles)
-  const wheelR = Math.min(7, h * 0.36);
+
+  // 6c) Drie zijramen in de cabine (in de derde laag)
+  const winInCabinH = cabinH - 4;
+  const winInCabinTop = cabinRoofTop + 2;
+  const sideWinW = (cabinW * 0.72 - 8) / 3;
+  for (let i = 0; i < 3; i++) {
+    const wx = cabinLeft + cabinW * 0.28 + 6 + i * (sideWinW + 2);
+    ctx.fillRect(wx, winInCabinTop, sideWinW, winInCabinH);
+    ctx.strokeRect(wx, winInCabinTop, sideWinW, winInCabinH);
+  }
+
+  // —— 7) Grille + koplamp voor ——
+  ctx.fillStyle = '#353d2a';
+  ctx.fillRect(bodyLeft + 3, hoodTop + 2, 6, hoodH - 4);
+  ctx.strokeRect(bodyLeft + 3, hoodTop + 2, 6, hoodH - 4);
+  ctx.fillStyle = '#f1c40f';
+  ctx.beginPath();
+  ctx.arc(bodyLeft + 6, hoodTop + hoodH * 0.5, 2, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+
+  // —— 8) Reservespaan achter (ovaal/cirkel) + bumper achter ——
+  const spareX = screenX + w - 10;
+  const spareY = bodyTop + bodyH * 0.5;
+  const spareR = Math.min(6, wheelR * 0.6);
   ctx.fillStyle = '#1a1a1a';
-  ctx.strokeStyle = '#2c2c2c';
-  [0.2, 0.42, 0.58, 0.8].forEach((frac) => {
-    ctx.beginPath();
-    ctx.arc(screenX + w * frac, groundY - wheelR, wheelR, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.stroke();
-  });
+  ctx.beginPath();
+  ctx.arc(spareX, spareY, spareR, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = oliveRim;
+  ctx.beginPath();
+  ctx.arc(spareX, spareY, spareR * 0.4, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = oliveDark;
+  ctx.fillRect(screenX + w - 10, bodyBottom, 8, 3);
+  ctx.strokeRect(screenX + w - 10, bodyBottom, 8, 3);
 }
 
 function drawTank(screenX, groundY, w, h) {
@@ -1218,16 +1303,12 @@ function draw() {
   ctx.save();
   ctx.scale(scaleX, scaleY);
 
-  if (currentLevel === 2) {
-    drawLevel2();
-    ctx.restore();
-    return;
-  }
   if (levelPhase === 'intro_tooltip') {
     drawSky();
     drawDistantSilhouettes();
     drawParallaxBackground();
     drawScrollingGround();
+    drawTrenches();
   } else if (levelPhase === 'parachute') {
     drawParachuteIntro();
   } else {
@@ -1235,251 +1316,23 @@ function draw() {
     drawDistantSilhouettes();
     drawParallaxBackground();
     drawScrollingGround();
+    drawTrenches();
     drawObstacles();
+    ctx.font = '22px sans-serif';
+    ctx.textBaseline = 'top';
+    for (let i = 0; i < CONFIG.MAX_LIVES; i++) {
+      ctx.fillText(i < lives ? '❤️' : '🖤', 12 + i * 26, 14);
+    }
     const animTime = (performance.now() / 1000) - levelStartTime;
     drawSoldier(ctx, ploffersonScreenX, getPloffersonY(), '#2d5016', 'P', animTime, true);
+    if (isInvincible) invincibleFlashToggle = !invincibleFlashToggle;
     const friendScreenX = friendWorldX - worldScrollX;
-    const color = selectedCharacter ? selectedCharacter.color : '#8b7355';
-    const label = selectedCharacter ? selectedCharacter.name.charAt(0) : '?';
-    drawSoldier(ctx, friendScreenX, friendY, color, label, animTime, false);
-  }
-
-  ctx.restore();
-}
-
-function drawLevel2() {
-  drawSky();
-  drawDistantSilhouettes();
-  drawParallaxBackground();
-  drawScrollingGround();
-  const groundY = CONFIG.GROUND_Y;
-  for (const o of l2Obstacles) {
-    const screenX = o.worldX - worldScrollX;
-    if (o.type === 'building') {
-      if (screenX + o.width < 0 || screenX > CONFIG.CANVAS_WIDTH) continue;
-      drawL2Building(screenX, groundY, o.width, o.height);
-    } else {
-      if (screenX + o.radius * 2 + CONFIG.L2_BALLOON_SIZE < 0 || screenX > CONFIG.CANVAS_WIDTH + 20) continue;
-      drawL2Mine(screenX, o.y, o.radius);
+    const color = '#4a9c5e';
+    const label = playerNickname ? playerNickname.trim().charAt(0).toUpperCase() : '?';
+    if (!isInvincible || invincibleFlashToggle) {
+      drawSoldier(ctx, friendScreenX, friendY, color, label, animTime, false);
     }
   }
-  const elapsed = getLevelElapsed();
-  const inIntro = elapsed < CONFIG.L2_INTRO_DURATION;
-  let heliDrawX = CONFIG.HELI_FIXED_X;
-  if (inIntro) {
-    const t = Math.min(1, elapsed / CONFIG.L2_INTRO_DURATION);
-    const easeOut = 1 - (1 - t) * (1 - t);
-    heliDrawX = -60 + (CONFIG.HELI_FIXED_X + 60) * easeOut;
-  }
-  if (l2ExplosionStartTime > 0) {
-    const explosionT = (performance.now() / 1000) - l2ExplosionStartTime;
-    const progress = Math.min(1, explosionT / L2_EXPLOSION_DURATION);
-    const cx = heliDrawX + CONFIG.HELI_SIZE / 2;
-    const cy = heliY + CONFIG.HELI_SIZE / 2;
-    const baseR = CONFIG.HELI_SIZE * 0.5;
-    const maxR = CONFIG.HELI_SIZE * 2.2;
-    const r = baseR + (maxR - baseR) * progress;
-    const alpha = 1 - progress * progress;
-    ctx.save();
-    ctx.globalAlpha = alpha;
-    const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
-    g.addColorStop(0, 'rgba(255,180,50,0.9)');
-    g.addColorStop(0.4, 'rgba(255,100,0,0.6)');
-    g.addColorStop(0.7, 'rgba(220,50,0,0.3)');
-    g.addColorStop(1, 'rgba(180,0,0,0)');
-    ctx.fillStyle = g;
-    ctx.beginPath();
-    ctx.arc(cx, cy, r, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.globalAlpha = 1;
-    ctx.restore();
-  } else {
-    drawHelicopter(heliDrawX, heliY);
-  }
-}
-
-function drawL2Building(x, groundY, w, h) {
-  const top = groundY - h;
-  ctx.strokeStyle = '#2c2c2c';
-  ctx.lineWidth = 1.5;
-  ctx.fillStyle = '#5a6a7a';
-  ctx.fillRect(x, top, w, h);
-  ctx.strokeRect(x, top, w, h);
-  ctx.fillStyle = '#37474f';
-  const winW = Math.min(14, w * 0.25);
-  const winH = 12;
-  for (let row = 0; row < Math.floor(h / 28); row++) {
-    for (let col = 0; col < Math.floor(w / (winW + 4)); col++) {
-      ctx.fillRect(x + 4 + col * (winW + 4), top + 6 + row * 28, winW, winH);
-    }
-  }
-}
-
-function drawL2Mine(x, y, radius) {
-  const balloonY = y - CONFIG.L2_BALLOON_SIZE - radius - 6;
-  const cx = x + radius;
-  ctx.strokeStyle = '#1a1a1a';
-  ctx.lineWidth = 1.5;
-  ctx.fillStyle = '#e74c3c';
-  ctx.beginPath();
-  ctx.arc(cx, balloonY, CONFIG.L2_BALLOON_SIZE / 2, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.stroke();
-  ctx.strokeStyle = '#2c3e50';
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(cx - 4, balloonY + CONFIG.L2_BALLOON_SIZE / 2);
-  ctx.lineTo(cx, y - radius);
-  ctx.moveTo(cx + 4, balloonY + CONFIG.L2_BALLOON_SIZE / 2);
-  ctx.lineTo(cx, y - radius);
-  ctx.stroke();
-  ctx.fillStyle = '#2a2a2a';
-  ctx.strokeStyle = '#1a1a1a';
-  ctx.beginPath();
-  ctx.arc(cx, y, radius, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.stroke();
-  const spikeCount = 10;
-  const spikeLen = radius * 1.1;
-  ctx.strokeStyle = '#1a1a1a';
-  ctx.lineWidth = 2;
-  for (let i = 0; i < spikeCount; i++) {
-    const angle = (i / spikeCount) * Math.PI * 2;
-    const sx = cx + Math.cos(angle) * radius;
-    const sy = y + Math.sin(angle) * radius;
-    const ex = cx + Math.cos(angle) * spikeLen;
-    const ey = y + Math.sin(angle) * spikeLen;
-    ctx.beginPath();
-    ctx.moveTo(sx, sy);
-    ctx.lineTo(ex, ey);
-    ctx.stroke();
-  }
-}
-
-function drawHelicopter(x, y) {
-  const w = CONFIG.HELI_SIZE;
-  const h = CONFIG.HELI_SIZE * 0.9;
-  const cx = x + w / 2;
-  const cy = y + h / 2;
-
-  ctx.save();
-  ctx.translate(cx, cy);
-  ctx.scale(-1, 1);
-  ctx.translate(-cx, -cy);
-
-  // Rotor angle: spin main + tail rotor (tail 3x faster for effect)
-  const t = performance.now() / 1000;
-  const mainRotorAngle = t * 12;
-  const tailRotorAngle = t * 24;
-
-  ctx.lineWidth = 2;
-  ctx.lineCap = 'round';
-  ctx.lineJoin = 'round';
-
-  // —— Fuselage (egg-shaped body) ——
-  ctx.fillStyle = '#3d5a3d';
-  ctx.strokeStyle = '#1e3d1e';
-  ctx.beginPath();
-  ctx.ellipse(cx, cy + 2, w * 0.42, h * 0.48, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.stroke();
-
-  // Side stripes + star (character)
-  ctx.strokeStyle = '#2a4a2a';
-  ctx.lineWidth = 1.5;
-  ctx.beginPath();
-  ctx.moveTo(cx - 6, y + h * 0.35);
-  ctx.lineTo(cx - 6, y + h * 0.65);
-  ctx.moveTo(cx - 2, y + h * 0.4);
-  ctx.lineTo(cx - 2, y + h * 0.6);
-  ctx.moveTo(cx + 2, y + h * 0.35);
-  ctx.lineTo(cx + 2, y + h * 0.65);
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.arc(cx - 4, y + h * 0.52, 3, 0, Math.PI * 2);
-  ctx.stroke();
-
-  // Cockpit (lighter oval)
-  ctx.fillStyle = 'rgba(180,220,200,0.6)';
-  ctx.strokeStyle = '#2a4a2a';
-  ctx.beginPath();
-  ctx.ellipse(cx - 2, y + h * 0.32, 6, 8, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.stroke();
-
-  // —— Tail boom ——
-  ctx.strokeStyle = '#1e3d1e';
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(cx + w * 0.38, cy);
-  ctx.lineTo(cx + w * 0.7, cy - 2);
-  ctx.stroke();
-
-  // Tail fin
-  ctx.beginPath();
-  ctx.moveTo(cx + w * 0.7, cy - 2);
-  ctx.lineTo(cx + w * 0.72, cy - 8);
-  ctx.lineTo(cx + w * 0.78, cy - 2);
-  ctx.closePath();
-  ctx.fillStyle = '#3d5a3d';
-  ctx.fill();
-  ctx.stroke();
-
-  // —— Tail rotor (spinning) ——
-  ctx.save();
-  ctx.translate(cx + w * 0.74, cy - 6);
-  ctx.rotate(tailRotorAngle);
-  ctx.strokeStyle = '#1a1a1a';
-  ctx.lineWidth = 1.5;
-  ctx.beginPath();
-  ctx.moveTo(-6, 0);
-  ctx.lineTo(6, 0);
-  ctx.moveTo(0, -4);
-  ctx.lineTo(0, 4);
-  ctx.stroke();
-  ctx.restore();
-
-  // —— Main rotor mast ——
-  ctx.strokeStyle = '#2a352a';
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(cx, y + h * 0.08);
-  ctx.lineTo(cx, y - 2);
-  ctx.stroke();
-
-  // —— Main rotor (spinning) ——
-  ctx.save();
-  ctx.translate(cx, y - 2);
-  ctx.rotate(mainRotorAngle);
-  ctx.strokeStyle = '#1a1a1a';
-  ctx.fillStyle = 'rgba(40,50,40,0.9)';
-  ctx.lineWidth = 2;
-  const bladeLen = w * 0.52;
-  ctx.beginPath();
-  ctx.ellipse(0, 0, bladeLen, 3, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.moveTo(-bladeLen, 0);
-  ctx.lineTo(bladeLen, 0);
-  ctx.stroke();
-  ctx.restore();
-
-  // —— Skids ——
-  ctx.strokeStyle = '#2a352a';
-  ctx.lineWidth = 2;
-  const skidY = y + h * 0.88;
-  ctx.beginPath();
-  ctx.moveTo(cx - w * 0.32, skidY);
-  ctx.quadraticCurveTo(cx - w * 0.2, skidY - 4, cx, skidY - 2);
-  ctx.quadraticCurveTo(cx + w * 0.2, skidY, cx + w * 0.32, skidY);
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.moveTo(cx - w * 0.22, skidY);
-  ctx.lineTo(cx - w * 0.22, skidY + 6);
-  ctx.moveTo(cx + w * 0.22, skidY);
-  ctx.lineTo(cx + w * 0.22, skidY + 6);
-  ctx.stroke();
 
   ctx.restore();
 }
@@ -1515,12 +1368,6 @@ function drawSoldier(ctx, x, y, color, label, animTime, isElite) {
   if (typeof levelPhase !== 'undefined' && levelPhase === 'parachute') {
     legOffset = 0;
   }
-
-  // #region agent log
-  if (typeof levelPhase !== 'undefined' && levelPhase === 'parachute') {
-    fetch('http://127.0.0.1:7243/ingest/2a1a30c2-e1ba-46c1-a5c2-9acdecdfcce3',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'dcaaa3'},body:JSON.stringify({sessionId:'dcaaa3',location:'game.js:drawSoldier',message:'Soldier parachute pose',data:{legOffset:0,runId:'post-fix'},timestamp:Date.now(),hypothesisId:'H1'})}).catch(()=>{});
-  }
-  // #endregion
 
   // —— Head: Plofferson uses photo (larger than player head); others use drawn chibi head ——
   const headRadiusX = w * 0.42;
@@ -1636,14 +1483,14 @@ function gameLoop(time) {
 function initGameOverAndWin() {
   document.getElementById('btn-retry').addEventListener('click', () => {
     setState(GameState.PLAYING, 'game-screen');
-    requestAnimationFrame(() => currentLevel === 2 ? startLevel2() : startLevel1());
+    requestAnimationFrame(() => startLevel1());
   });
   document.getElementById('btn-gameover-menu').addEventListener('click', () => {
     setState(GameState.MENU, 'main-menu');
   });
   document.getElementById('btn-win-retry').addEventListener('click', () => {
     setState(GameState.PLAYING, 'game-screen');
-    requestAnimationFrame(() => currentLevel === 2 ? startLevel2() : startLevel1());
+    requestAnimationFrame(() => startLevel1());
   });
   document.getElementById('btn-win-menu').addEventListener('click', () => {
     setState(GameState.MENU, 'main-menu');
@@ -1656,7 +1503,7 @@ function initGameOverAndWin() {
 function initStartScreen() {
   const startEl = document.getElementById('start-screen');
   if (!startEl) return;
-  startEl.addEventListener('click', () => showScreen('main-menu'));
+  startEl.addEventListener('click', () => showScreen('nickname-screen'));
 }
 
 /**
@@ -1665,14 +1512,12 @@ function initStartScreen() {
 function init() {
   ploffersonHeadImage = new Image();
   ploffersonHeadImage.src = 'assets/plofferson-head.png';
-  try { level1Completed = localStorage.getItem('stayClose_level1Completed') === '1'; } catch (_) {}
   initStartScreen();
   initMainMenu();
-  initChoosePlayer();
+  initNicknameScreen();
   initModal();
   initInput();
   initTouchControls();
-  initTouchControlsL2();
   initGameOverAndWin();
   window.addEventListener('resize', () => {
     if (state === GameState.PLAYING) resizeCanvas();

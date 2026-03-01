@@ -2,3 +2,9 @@
 *.log
 .DS_Store
 Thumbs.db
+
+# Environment and dependencies
+.env
+.env.*
+!.env.example
+node_modules/
